@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+# This has to be exported to make some magic below work.
+export DH_OPTIONS
+
+ifneq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
+	DEBUG += --enable-developer
+endif
+
+%:
+	dh $@  --with autoreconf
+
+override_dh_auto_configure:
+	dh_auto_configure -- --disable-silent-rules $(DEBUG)
+
+override_dh_strip:
+	dh_strip --dbg-package=gdnsd-dbg
+
+override_dh_installchangelogs:
+	dh_installchangelogs NEWS
+
+.PHONY: override_dh_auto_configure override_dh_strip override_dh_installchangelogs

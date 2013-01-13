@@ -1,0 +1,5 @@
+gdnsd (1.7.5-1) experimental; urgency=low
+
+  * Initial release (Closes: #694173).
+
+ -- Faidon Liambotis <paravoid@debian.org>  Sun, 13 Jan 2013 08:15:00 +0200

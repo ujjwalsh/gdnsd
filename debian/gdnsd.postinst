@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+if test "$1" = "configure"; then
+    if ! getent passwd gdnsd > /dev/null; then
+        adduser --quiet --system --group --no-create-home gdnsd
+    fi
+fi
+
+#DEBHELPER#
+
+exit 0
