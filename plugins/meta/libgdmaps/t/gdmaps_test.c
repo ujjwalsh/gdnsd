@@ -45,19 +45,27 @@
 #include "gdmaps.h"
 #include "gdmaps_test.h"
 
-static const char CFG_PATH[] = "etc/config";
+static const vscf_data_t* conf_load_vscf(void) {
+    const vscf_data_t* out = NULL;
 
-static const vscf_data_t* conf_load(void) {
-    char* vscf_err;
-    const vscf_data_t* cfg_root = vscf_scan_filename(CFG_PATH, &vscf_err);
-    if(!cfg_root)
-        log_fatal("Configuration load from %s failed: %s", logf_pathname(CFG_PATH), vscf_err);
+    char* cfg_path = gdnsd_resolve_path_cfg("config", NULL);
 
-    dmn_assert(vscf_is_hash(cfg_root));
-    return cfg_root;
+    struct stat cfg_stat;
+    if(!stat(cfg_path, &cfg_stat)) {
+        log_debug("Loading configuration from '%s'", cfg_path);
+        char* vscf_err;
+        out = vscf_scan_filename(cfg_path, &vscf_err);
+        if(!out)
+            log_fatal("Configuration from '%s' failed: %s", cfg_path, vscf_err);
+    }
+    else {
+        log_debug("No config file at '%s', using defaults + zones auto-scan", cfg_path);
+    }
+
+    free(cfg_path);
+    return out;
 }
 
-F_NONNULL
 static void conf_options(const vscf_data_t* cfg_root) {
     dmn_assert(cfg_root);
 
@@ -106,6 +114,28 @@ static const vscf_data_t* conf_get_maps(const vscf_data_t* cfg_root) {
 
 //***** Public funcs
 
+void gdmaps_lookup_noop(const unsigned tnum, const gdmaps_t* gdmaps, const char* map_name, const char* addr_txt) {
+    dmn_assert(gdmaps);
+    dmn_assert(map_name);
+    dmn_assert(addr_txt);
+
+    log_info("Subtest %u starting", tnum);
+
+    int map_idx = gdmaps_name2idx(gdmaps, map_name);
+    if(map_idx < 0)
+        log_fatal("Subtest %u failed: Map name '%s' not found in configuration", tnum, map_name);
+
+    client_info_t cinfo;
+    cinfo.edns_client_mask = 128U;
+    unsigned scope = 175U;
+
+    const int addr_err = gdnsd_anysin_getaddrinfo(addr_txt, NULL, &cinfo.edns_client);
+    if(addr_err)
+        log_fatal("Subtest %u failed: Cannot parse address '%s': %s", tnum, addr_txt, gai_strerror(addr_err));
+
+    gdmaps_lookup(gdmaps, map_idx, &cinfo, &scope);
+}
+
 void gdmaps_test_lookup_check(const unsigned tnum, const gdmaps_t* gdmaps, const char* map_name, const char* addr_txt, const char* dclist_cmp, const unsigned scope_cmp) {
     dmn_assert(gdmaps);
     dmn_assert(map_name);
@@ -149,7 +179,7 @@ gdmaps_t* gdmaps_test_init(const char* input_rootdir) {
     dmn_init_log("gdmaps_test", true);
 
     gdnsd_set_rootdir(input_rootdir);
-    const vscf_data_t* cfg_root = conf_load();
+    const vscf_data_t* cfg_root = conf_load_vscf();
     conf_options(cfg_root);
 
     const vscf_data_t* maps_cfg = conf_get_maps(cfg_root);

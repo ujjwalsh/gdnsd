@@ -1,3 +1,9 @@
+gdnsd (1.7.6-1) experimental; urgency=low
+
+  * New upstream release.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Fri, 18 Jan 2013 02:53:30 +0200
+
 gdnsd (1.7.5-1) experimental; urgency=low
 
   * Initial release (Closes: #694173).

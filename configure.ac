@@ -1,5 +1,5 @@
 AC_PREREQ([2.69])
-AC_INIT([gdnsd],[1.7.5],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
+AC_INIT([gdnsd],[1.7.6],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
 AC_CONFIG_SRCDIR([gdnsd/main.c])
 AC_CONFIG_AUX_DIR([acaux])
 AM_INIT_AUTOMAKE([1.11.6 dist-xz no-dist-gzip foreign tar-ustar -Wall])
@@ -253,7 +253,7 @@ AC_PATH_PROG([PERL],[perl],[$am_aux_dir/noperl])
 AC_PATH_PROG([POD2MAN],[pod2man],[$am_aux_dir/noperl])
 AC_PATH_PROG([POD2TEXT],[pod2text],[$am_aux_dir/noperl])
 AX_PROG_PERL_VERSION([5.8.1],[
-    AX_PROG_PERL_MODULES([Test::More Net::DNS=0.63 LWP=5.805 Socket6 IO::Socket::INET6],[HAVE_TESTSUITE_MODULES=1], AC_MSG_WARN([[Cannot "make check" without Perl modules Test::More (aka Test-Simple for some package managers), Net::DNS 0.63+, LWP (aka libwww-perl) 5.805+, Socket6, and IO::Socket::INET6]]))
+    AX_PROG_PERL_MODULES([Test::More Net::DNS=0.63 LWP=5.805 Socket6 IO::Socket::INET6 HTTP::Daemon],[HAVE_TESTSUITE_MODULES=1], AC_MSG_WARN([[Cannot "make check" without Perl modules Test::More (aka Test-Simple for some package managers), Net::DNS 0.63+, LWP (aka libwww-perl) 5.805+, Socket6, and IO::Socket::INET6]]))
 ],[
     AC_MSG_WARN([Cannot "make check" or (re-)generate documentation without perl 5.8.1+ (neither of which are strictly necessary to build and install from a tarball)])
 ])

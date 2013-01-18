@@ -410,7 +410,6 @@ static unsigned get_dclist_cached(geoip_db_t* db, const unsigned offset) {
 F_NONNULL
 static bool list_xlate_recurse(geoip_db_t* db, nlist_t* nl, struct in6_addr ip, const int depth, const unsigned db_off) {
     dmn_assert(db); dmn_assert(nl);
-    dmn_assert(depth > 0);
     dmn_assert(depth < 129);
 
     bool rv = false;
@@ -543,7 +542,7 @@ static geoip_db_t* geoip_db_open(const char* pathname, const char* map_name, dcl
      *   3 bytes of the file.  If that's 0xFFFFFF, we're done,
      *   and it's a plain country database.
      * If those 3 bytes aren't 0xFFFFFF, then we step back by
-     *   *four* bytes and try again.  From here on when we get
+     *   one byte and try again.  From here on when we get
      *   our match on the first 3 bytes being 0xFFFFFF, the
      *   4th byte is the database type.
      */
@@ -554,7 +553,7 @@ static geoip_db_t* geoip_db_open(const char* pathname, const char* map_name, dcl
             if(i) db->type = db->data[offset + 3];
             break;
         }
-        offset -= 4;
+        offset -= 1;
         if(offset < 0)
             break;
     }

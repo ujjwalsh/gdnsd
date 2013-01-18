@@ -17,8 +17,8 @@
  *
  */
 
-#ifndef _GDNSD_DNSPACKET_H
-#define _GDNSD_DNSPACKET_H
+#ifndef GDNSD_DNSPACKET_H
+#define GDNSD_DNSPACKET_H
 
 #include "config.h"
 #include "ltree.h"
@@ -71,7 +71,7 @@ typedef struct {
 
 typedef struct {
     const uint8_t* original; // Alias to the original uncompressed dname's data (not the len byte)
-    const uint8_t* comp_ptr; // where compression occured on storage (could be off the end if uncompressed)
+    const uint8_t* comp_ptr; // where compression occurred on storage (could be off the end if uncompressed)
     unsigned int stored_at; // offset this name was first stored to in the packet, possibly partially compressed
 } comptarget_t;
 
@@ -174,4 +174,4 @@ void dnspacket_wait_stats(void);
 
 extern dnspacket_stats_t** dnspacket_stats;
 
-#endif // _GDNSD_DNSPACKET_H
+#endif // GDNSD_DNSPACKET_H
