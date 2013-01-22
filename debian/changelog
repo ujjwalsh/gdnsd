@@ -1,8 +1,9 @@
 gdnsd (1.7.6-1) experimental; urgency=low
 
   * New upstream release.
+  * Update debian/copyright for 2013.
 
- -- Faidon Liambotis <paravoid@debian.org>  Fri, 18 Jan 2013 02:53:30 +0200
+ -- Faidon Liambotis <paravoid@debian.org>  Tue, 22 Jan 2013 14:26:34 +0200
 
 gdnsd (1.7.5-1) experimental; urgency=low
 

@@ -3,7 +3,7 @@ Upstream-Name: gdnsd
 Source: https://github.com/blblack/gdnsd
 
 Files: *
-Copyright: 2012 Brandon L Black <blblack@gmail.com>
+Copyright: 2012-2013 Brandon L Black <blblack@gmail.com>
 License: GPL-3+
  gdnsd is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -22,7 +22,7 @@ License: GPL-3+
  Public License can be found in "/usr/share/common-licenses/GPL".
 
 Files: debian/*
-Copyright: 2012 Faidon Liambotis <paravoid@debian.org>
+Copyright: 2012-2013 Faidon Liambotis <paravoid@debian.org>
 License: GPL-3+
  This package is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
