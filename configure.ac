@@ -1,5 +1,5 @@
 AC_PREREQ([2.69])
-AC_INIT([gdnsd],[1.7.6],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
+AC_INIT([gdnsd],[1.7.7],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
 AC_CONFIG_SRCDIR([gdnsd/main.c])
 AC_CONFIG_AUX_DIR([acaux])
 AM_INIT_AUTOMAKE([1.11.6 dist-xz no-dist-gzip foreign tar-ustar -Wall])
@@ -68,8 +68,7 @@ AC_CHECK_MEMBERS([struct stat.st_mtimespec.tv_nsec])
 AC_CHECK_MEMBERS([struct stat.st_mtimensec])
 
 dnl *mmsg for Linux
-HAS_SENDMMSG=0
-AC_CHECK_FUNCS([sendmmsg],[HAS_SENDMMSG=1])
+AC_CHECK_FUNCS([recvmmsg sendmmsg])
 
 dnl ======== Begin Network Stuff ==========
 AC_DEFINE_UNQUOTED([__APPLE_USE_RFC_3542],1,[Force MacOS Lion to use RFC3542 IPv6 stuff])
@@ -253,7 +252,7 @@ AC_PATH_PROG([PERL],[perl],[$am_aux_dir/noperl])
 AC_PATH_PROG([POD2MAN],[pod2man],[$am_aux_dir/noperl])
 AC_PATH_PROG([POD2TEXT],[pod2text],[$am_aux_dir/noperl])
 AX_PROG_PERL_VERSION([5.8.1],[
-    AX_PROG_PERL_MODULES([Test::More Net::DNS=0.63 LWP=5.805 Socket6 IO::Socket::INET6 HTTP::Daemon],[HAVE_TESTSUITE_MODULES=1], AC_MSG_WARN([[Cannot "make check" without Perl modules Test::More (aka Test-Simple for some package managers), Net::DNS 0.63+, LWP (aka libwww-perl) 5.805+, Socket6, and IO::Socket::INET6]]))
+    AX_PROG_PERL_MODULES([Test::More Net::DNS=0.63 LWP=5.805 Socket6 IO::Socket::INET6 HTTP::Daemon],[HAVE_TESTSUITE_MODULES=1], AC_MSG_WARN([[Cannot "make check" without Perl modules Test::More (aka Test-Simple for some package managers), Net::DNS 0.63+, LWP (aka libwww-perl) 5.805+, Socket6, IO::Socket::INET6, and HTTP::Daemon]]))
 ],[
     AC_MSG_WARN([Cannot "make check" or (re-)generate documentation without perl 5.8.1+ (neither of which are strictly necessary to build and install from a tarball)])
 ])
@@ -297,8 +296,8 @@ dnl   adds "-Wall -W" to CFLAGS if the compiler is gcc.
 dnl --enable-developer sets liburcu debug stuff and doesn't set -DNDEBUG,
 dnl   and also sets "-g" for debug if the compiler supports it,
 dnl   and sets a ton of gcc 4.x extra warnings flags.
-GCC_WARNFLAGS="-Wall -W"
-GCC_DEV_WARNFLAGS="${GCC_WARNFLAGS} -Wmissing-declarations -Wmissing-prototypes -Wpointer-arith -Wsign-compare -Wchar-subscripts -Wstrict-prototypes -Wshadow -Wformat-security -Wfloat-equal -Wwrite-strings -Wcast-align -Wredundant-decls"
+GCC_WARNFLAGS="-Wall -W -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wshadow -Wredundant-decls -Wwrite-strings -Wformat=2"
+GCC_DEV_WARNFLAGS="${GCC_WARNFLAGS} -Wpointer-arith -Wfloat-equal -Wcast-align"
 if test "x$developer" != xno; then
   if test "x$ac_cv_c_compiler_gnu" = xyes; then
     CFLAGS="${CFLAGS} -g ${GCC_DEV_WARNFLAGS}"
@@ -376,7 +375,6 @@ dnl Summary output for the user
 
 if test "x$developer" != xno; then CFSUM_DEV=Yes; else CFSUM_DEV=No; fi
 if test "x$USE_LINUX_CAPS" = x1; then CFSUM_CAP=Yes; else CFSUM_CAP=No; fi
-if test "x$HAS_SENDMMSG" = x1; then CFSUM_SENDMMSG=Yes; else CFSUM_SENDMMSG=No; fi
 if test "x$USE_INOTIFY" = x1; then CFSUM_INOTIFY=Yes; else CFSUM_INOTIFY=No; fi
 if test "x$HAVE_QSBR" = x1; then
     CFSUM_QSBR=Yes
@@ -394,7 +392,6 @@ echo "| Configuration Summary:"
 echo "| Developer Build?        $CFSUM_DEV"
 echo "| Userspace-rcu support:  $CFSUM_QSBR"
 echo "| Linux libcap support:   $CFSUM_CAP"
-echo "| Linux sendmmsg support: $CFSUM_SENDMMSG"
 echo "| Linux inotify support:  $CFSUM_INOTIFY"
 echo "| Test Port Start:        $CFSUM_TP"
 echo "======================================="
