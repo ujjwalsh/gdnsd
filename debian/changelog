@@ -1,8 +1,11 @@
 gdnsd (1.7.7-1) experimental; urgency=low
 
   * New upstream release.
+  * Build-Depends on libcap-dev only on Linux targets.
+  * Build-Depends on liburcu-dev only on the subset of architectures liburcu
+    supports.
 
- -- Faidon Liambotis <paravoid@debian.org>  Wed, 23 Jan 2013 13:31:48 +0200
+ -- Faidon Liambotis <paravoid@debian.org>  Thu, 31 Jan 2013 02:09:11 +0200
 
 gdnsd (1.7.6-1) experimental; urgency=low
 
