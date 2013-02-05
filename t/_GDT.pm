@@ -143,8 +143,6 @@ else {
 
 our $RAND_LOOPS = $ENV{GDNSD_RTEST_LOOPS} || 100;
 
-die "Cannot run testsuite as root" if ! $>;
-
 my $CSV_TEMPLATE = 
     "uptime\r\n"
     . "([0-9]+)\r\n"
@@ -237,14 +235,16 @@ sub check_stats_inner {
 
 sub check_stats {
     my ($class, %to_check) = @_;
+    my $total_attempts = $TEST_RUNNER ? 30 : 10;
+    my $attempt_delay = $TEST_RUNNER ? 0.5 : 0.1;
     my $err;
     my $attempts = 0;
     while(1) {
         eval { $class->check_stats_inner(%to_check) };
         $err = $@;
         return unless $err;
-        if($err !~ /hard-fail/ && $attempts++ < 10) {
-            select(undef, undef, undef, 0.1 * $attempts);
+        if($err !~ /hard-fail/ && $attempts++ < $total_attempts) {
+            select(undef, undef, undef, $attempt_delay * $attempts);
         }
         else {
             die "Stats check failed: $err";
@@ -398,7 +398,7 @@ sub test_log_output {
     #   settings of 0.05 and 9 leads to a total wait
     #   time of up to 25.55 seconds.
     my $retry_delay = 0.05;
-    my $retry = 9;
+    my $retry = $TEST_RUNNER ? 10 : 9;
     while(scalar(keys %$texts) && $retry--) {
         while(scalar(keys %$texts) && ($_ = <$GDOUT_FH>)) {
             foreach my $k (keys %$texts) {
@@ -947,7 +947,7 @@ sub test_kill_daemon {
     else {
         eval {
             local $SIG{ALRM} = sub { die "Failed to kill daemon cleanly at pid $pid"; };
-            alarm(5);
+            alarm($TEST_RUNNER ? 30 : 5);
             kill(2, $pid);
             waitpid($pid, 0);
         };

@@ -355,7 +355,8 @@ static void process_listen(const vscf_data_t* listen_opt, const unsigned def_dns
             addrconf->udp_rcvbuf = def_udp_rcvbuf;
             addrconf->udp_sndbuf = def_udp_sndbuf;
             addrconf->late_bind_secs = def_late_bind_secs;
-            dmn_log_info("DNS listener configured by default for %s", logf_anysin(&addrconf->addr));
+            addrconf->autoscan = true;
+            dmn_log_info("DNS listener configured by default interface scanning for %s", logf_anysin(&addrconf->addr));
         }
 
         if(!gconfig.num_dns_addrs)
@@ -514,9 +515,8 @@ void conf_load(void) {
         CFG_OPT_UINT(options, max_addtl_rrsets, 16LU, 256LU);
         CFG_OPT_BOOL(options, zones_rfc1035_strict_startup);
         CFG_OPT_BOOL(options, zones_rfc1035_auto);
-        // it's important that neither of these reload times have a lower
-        //   bound below the 2s mark, as it could cause us to miss fast
-        //   events on filesystems with 1-second mtime resolution.
+        // it's important that auto_interval is never lower than 2s, or it could cause
+        //   us to miss fast events on filesystems with 1-second mtime resolution.
         CFG_OPT_UINT(options, zones_rfc1035_auto_interval, 10LU, 600LU);
         CFG_OPT_DBL(options, zones_rfc1035_min_quiesce, 0.0, 5.0);
         CFG_OPT_DBL(options, zones_rfc1035_quiesce, 0.0, 60.0);

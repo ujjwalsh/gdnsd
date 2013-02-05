@@ -11,7 +11,7 @@ The geographically-aware features also support the emerging EDNS Client Subnet d
 
 This project is hosted at Github: https://github.com/blblack/gdnsd 
 
-Release download tarballs: http://downloads.gdnsd.net/
+Release downloads: http://downloads.gdnsd.net/
 
 Bug reports: https://github.com/blblack/gdnsd/issues
 
@@ -68,7 +68,7 @@ The following are optional, but generally recommended:
 The following have no real effect on the build or runtime, but are required in order to run the testsuite:
 
 * Perl 5.8.1 or higher
-* Perl modules: Net::DNS 0.63+, LWP 5.805+, Socket6, IO::Socket::INET6
+* Perl modules: Net::DNS 0.63+, LWP 5.805+, Socket6, IO::Socket::INET6, HTTP::Daemon
 
 If working directly from a git clone rather than a tarball, in addition to all of the above:
 * ./autogen.sh will construct the configure script to get started

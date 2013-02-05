@@ -32,7 +32,7 @@
 #include <pwd.h>
 #include <time.h>
 
-#if USE_LINUX_CAPS
+#ifdef USE_LINUX_CAPS
 #include <sys/capability.h>
 #include <sys/prctl.h>
 #endif
@@ -95,11 +95,7 @@ static void hup_signal(struct ev_loop* loop V_UNUSED, struct ev_signal *w V_UNUS
 F_NONNULL F_NORETURN
 static void usage(const char* argv0) {
     fprintf(stderr,
-        PACKAGE_NAME " version " PACKAGE_VERSION
-#ifndef NDEBUG
-        " (developer build)"
-#endif
-        "\n"
+        PACKAGE_NAME " version " PACKAGE_VERSION "\n"
         "Usage: %s [-d <rootdir> ] <action>\n"
         "  -d <rootdir> - Use the given directory as the daemon chroot.  The\n"
         "     special value 'system' uses system default paths with no chroot.\n"
@@ -114,7 +110,33 @@ static void usage(const char* argv0) {
         "  force-reload - Aliases 'restart'\n"
         "  condrestart - Does 'restart' action only if already running\n"
         "  try-restart - Aliases 'condrestart'\n"
-        "  status - Checks the status of the running daemon\n"
+        "  status - Checks the status of the running daemon\n\n"
+        "Optional compile-time features:"
+
+#       ifndef NDEBUG
+            " debug"
+#       endif
+#       ifdef HAVE_QSBR
+            " urcu"
+#       endif
+#       ifdef USE_SENDMMSG
+            " mmsg"
+#       endif
+#       ifdef USE_INOTIFY
+            " inotify"
+#       endif
+#       ifdef USE_LINUX_CAPS
+            " libcap"
+#       endif
+
+#       if !defined NDEBUG \
+        && !defined HAVE_QSBR \
+        && !defined USE_SENDMMSG \
+        && !defined USE_INOTIFY \
+        && !defined USE_LINUX_CAPS
+            " none"
+#       endif
+
         "\nFor updates, bug reports, etc, please visit " PACKAGE_URL "\n",
         argv0, gdnsd_get_def_rootdir()
     );
@@ -281,7 +303,7 @@ static void memlock_rlimits(const bool started_as_root) {
 #endif
 
 static void caps_pre_secure(void) {
-#if USE_LINUX_CAPS
+#ifdef USE_LINUX_CAPS
     const cap_value_t pre_caps[] = {
         CAP_NET_BIND_SERVICE,
         CAP_SYS_CHROOT,
@@ -305,7 +327,7 @@ static void caps_pre_secure(void) {
 }
 
 static void caps_post_secure(void) {
-#if USE_LINUX_CAPS
+#ifdef USE_LINUX_CAPS
     const cap_value_t cap_netbind = CAP_NET_BIND_SERVICE;
     cap_t mycaps = cap_init();
     if(cap_set_flag(mycaps, CAP_PERMITTED, 1, &cap_netbind, CAP_SET))

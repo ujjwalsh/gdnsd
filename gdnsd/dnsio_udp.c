@@ -35,7 +35,6 @@
 #include "conf.h"
 #include "dnswire.h"
 #include "dnspacket.h"
-#include "sendmmsg-compat.h"
 #include "gdnsd/log.h"
 #include "gdnsd/prcu-priv.h"
 
@@ -189,7 +188,7 @@ bool udp_sock_setup(dns_addr_t *addrconf) {
                 logf_anysin(asin), logf_errno());
     }
     else {
-        // Enforce a basic minimum SO_SNDBUF in the range of 16K -> 256K depending
+        // Try to enforce a basic minimum SO_SNDBUF in the range of 16K -> 256K depending
         //   on max_response and mmsg config/detect.
         // The minimum (no mmsg, min max_response) would be 16K, and the defaults
         //   would be 64K for non-mmsg and 128K for mmsg cases.
@@ -205,11 +204,20 @@ bool udp_sock_setup(dns_addr_t *addrconf) {
         if(desired_sndbuf > 262144)
             desired_sndbuf = 262144;
 
+        // However, if that doesn't work, we'll negotiate down to a minimum
+        //   of gconfig.max_response.  Any smaller would cause send failures,
+        //   although the user may be able to configure around that by manually
+        //   specifying a smaller gconfig.max_response.
         if(opt_size < desired_sndbuf) {
             opt_size = desired_sndbuf;
-            if(setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &opt_size, sizeof(opt_size)) == -1)
-                log_fatal("Failed to set SO_SNDBUF to %u for UDP socket %s: %s", opt_size,
-                    logf_anysin(asin), logf_errno());
+            while(setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &opt_size, sizeof(opt_size)) == -1) {
+                if(opt_size > (int)(gconfig.max_response << 1))
+                    opt_size >>= 1;
+                else if(opt_size > (int)gconfig.max_response)
+                    opt_size = (int)gconfig.max_response;
+                else
+                    log_fatal("Failed to set SO_SNDBUF to %u for UDP socket %s: %s.  You may need to reduce the max_response option on this machine to a size it is capable of allocating for UDP buffers", opt_size, logf_anysin(asin), logf_errno());
+            }
         }
     }
 
@@ -221,10 +229,17 @@ bool udp_sock_setup(dns_addr_t *addrconf) {
     addrconf->udp_sock = sock;
 
     if(bind(sock, &asin->sa, asin->len)) {
-        if(addrconf->late_bind_secs && errno == EADDRNOTAVAIL) {
-            addrconf->udp_need_late_bind = 1;
-            log_info("UDP DNS socket %s not yet available, will attempt late bind every %u seconds", logf_anysin(asin), addrconf->late_bind_secs);
-            return ntohs(isv6 ? asin->sin6.sin6_port : asin->sin.sin_port) < 1024 ? true : false;
+        if(errno == EADDRNOTAVAIL) {
+            if(addrconf->autoscan) {
+                log_warn("Could not bind UDP socket %s (%s), configured by automatic interface scanning.  Will ignore this listen address.", logf_anysin(asin), logf_errno());
+                addrconf->udp_autoscan_bind_failed = true;
+                return false;
+            }
+            else if(addrconf->late_bind_secs) {
+                addrconf->udp_need_late_bind = true;
+                log_info("UDP DNS socket %s not yet available, will attempt late bind every %u seconds", logf_anysin(asin), addrconf->late_bind_secs);
+                return ntohs(isv6 ? asin->sin6.sin6_port : asin->sin.sin_port) < 1024 ? true : false;
+            }
         }
         log_fatal("Failed to bind() UDP socket to %s: %s", logf_anysin(asin), logf_errno());
     }
@@ -285,15 +300,16 @@ static void mainloop(const int fd, dnspacket_context_t* pctx, const bool use_cms
     }
 }
 
-#ifdef USE_MMSG
+#ifdef USE_SENDMMSG
 
 // check for linux 3.0+ for sendmmsg() (implies recvmmsg w/ MSG_WAITFORONE)
 static bool has_mmsg(void) {
-    static bool checked_mmsg = false;
-    static bool rv = false;
-    if(!checked_mmsg) {
-        rv = gdnsd_linux_min_version(3, 0, 0);
-        checked_mmsg = true;
+    bool rv = false;
+    rv = gdnsd_linux_min_version(3, 0, 0);
+    if(rv) {
+        /* this causes no harm and exits immediately */
+        sendmmsg(-1, 0, 0, 0);
+        rv = (errno != ENOSYS);
     }
     return rv;
 }
@@ -393,11 +409,11 @@ static void mainloop_mmsg(const unsigned width, const int fd, dnspacket_context_
     }
 }
 
-#else // USE_MMSG
+#else // USE_SENDMMSG
 
 static bool has_mmsg(void) { return false; }
 
-#endif // USE_MMSG
+#endif // USE_SENDMMSG
 
 // We need to use cmsg stuff in the case of any IPv6 address (at minimum,
 //  to copy the flow label correctly, if not the interface + source addr),
@@ -436,13 +452,20 @@ void* dnsio_udp_start(void* addrconf_asvoid) {
         }
         log_info("Late bind() of UDP socket to %s succeeded, serving requests now", logf_anysin(asin));
     }
+    else if(addrconf->udp_autoscan_bind_failed) {
+        // already logged this condition back when bind() failed, but it's simpler
+        //  to spawn the thread and do the dnspacket_context_new() here properly and
+        //  then exit the iothread.  The rest of the code will see this as a thread that
+        //  simply never gets requests.
+        pthread_exit(NULL);
+    }
 
     const bool need_cmsg = needs_cmsg(&addrconf->addr);
 
     gdnsd_prcu_rdr_thread_start();
     pthread_cleanup_push(thread_clean, NULL);
 
-#ifdef USE_MMSG
+#ifdef USE_SENDMMSG
     if(addrconf->udp_recv_width > 1) {
         log_debug("sendmmsg() with a width of %u enabled for UDP socket %s",
             addrconf->udp_recv_width, logf_anysin(&addrconf->addr));

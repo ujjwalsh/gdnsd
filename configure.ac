@@ -1,5 +1,5 @@
 AC_PREREQ([2.69])
-AC_INIT([gdnsd],[1.7.7],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
+AC_INIT([gdnsd],[1.8.0],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
 AC_CONFIG_SRCDIR([gdnsd/main.c])
 AC_CONFIG_AUX_DIR([acaux])
 AM_INIT_AUTOMAKE([1.11.6 dist-xz no-dist-gzip foreign tar-ustar -Wall])
@@ -21,6 +21,11 @@ dnl   feature, so we may as well double-check here for future-proofing
 AC_C_VARARRAYS
 if test "x$ac_cv_c_vararrays" = xno; then
     AC_MSG_ERROR([Your compiler lacks support for variable arrays])
+fi
+
+AX_CHECK_ALIGNED_ACCESS_REQUIRED
+if test "$ax_cv_have_aligned_access_required" = yes ; then
+    AC_MSG_ERROR([This code is broken on your platform due to unaligned memory access])
 fi
 
 dnl POSIX threads stuff
@@ -68,10 +73,15 @@ AC_CHECK_MEMBERS([struct stat.st_mtimespec.tv_nsec])
 AC_CHECK_MEMBERS([struct stat.st_mtimensec])
 
 dnl *mmsg for Linux
-AC_CHECK_FUNCS([recvmmsg sendmmsg])
+HAS_SENDMMSG=1
+AC_CHECK_DECLS([sendmmsg, recvmmsg],,[HAS_SENDMMSG=0],[[#include <sys/socket.h>]])
+AC_CHECK_FUNCS([sendmmsg recvmmsg],,[HAS_SENDMMSG=0])
+if test $HAS_SENDMMSG -eq 1; then
+    AC_DEFINE([USE_SENDMMSG],[1],[Linux sendmmsg is usable])
+fi
 
 dnl ======== Begin Network Stuff ==========
-AC_DEFINE_UNQUOTED([__APPLE_USE_RFC_3542],1,[Force MacOS Lion to use RFC3542 IPv6 stuff])
+AC_DEFINE([__APPLE_USE_RFC_3542],1,[Force MacOS Lion to use RFC3542 IPv6 stuff])
 
 dnl Find out if -lsocket -lnsl is needed, and put them
 dnl  in $NETLIBS if so, and use them for these network-related
@@ -124,10 +134,6 @@ AC_CHECK_DECLS([IPV6_RECVPKTINFO],,,[
 #include <netinet/in.h>
 #include <netinet/ip.h>
 ])
-
-dnl Network stuff
-AC_CHECK_FUNCS([accept4])
-AC_CHECK_DECLS([SOCK_NONBLOCK],,,[[#include <sys/socket.h>]])
 
 dnl restore original LIBS, from before NETLIBS
 LIBS=$XLIBS
@@ -217,19 +223,19 @@ if test $KILL_LIBCAP -eq 0; then
     ])
 fi
 
+USE_LINUX_CAPS=0
+CAPLIBS=
 if test $CAP_FUNCS -eq 1 -a $CAP_DECLS -eq 1; then
     USE_LINUX_CAPS=1
     CAPLIBS=$LIBS
+    AC_DEFINE([USE_LINUX_CAPS], [1], [Linux libcap2+prctl Capabilities])
 else
     if test $KILL_LIBCAP -eq 0 -a $IS_LINUX -eq 1; then
       AC_MSG_ERROR([Linux libcap support not found, you may need to install the libcap-devel or libcap-dev package, or explicitly specify --without-libcap (not recommended)])
     fi
-    USE_LINUX_CAPS=0
-    CAPLIBS=
 fi
 
 AC_SUBST([CAPLIBS])
-AC_DEFINE_UNQUOTED([USE_LINUX_CAPS], $USE_LINUX_CAPS, [Use Linux libcap2+prctl Capabilities])
 
 dnl restore original LIBS, from before CAPLIBS
 LIBS=$XLIBS
@@ -237,12 +243,15 @@ LIBS=$XLIBS
 dnl ======== End Capabilities Stuff ==========
 
 dnl == inotify stuff ==
-dnl inotify_init1() is 2.6.27+ and IN_EXCL_UNLINK is 2.6.36+
-dnl We require both to use inotify for zonefile scanning
+dnl inotify_init1() is Linux 2.6.27+ and glibc 2.9
+dnl We also use Linux 2.6.36+ / glibc 2.13 IN_EXCL_UNLINK, but we
+dnl   fix that with a manual ifndef for the define and a runtime
+dnl   kernel version check for the support
 USE_INOTIFY=1
 AC_CHECK_FUNCS([inotify_init1],,[USE_INOTIFY=0])
-AC_CHECK_DECLS([IN_EXCL_UNLINK],,[USE_INOTIFY=0],[[#include <sys/inotify.h>]])
-AC_DEFINE_UNQUOTED([USE_INOTIFY], $USE_INOTIFY, [Use Linux 2.6.36+ inotify support])
+if test $USE_INOTIFY -eq 1; then
+    AC_DEFINE([USE_INOTIFY], [1], [Linux 2.6.36+ inotify support])
+fi
 AM_CONDITIONAL([USE_INOTIFY], [test x$USE_INOTIFY = x1])
 
 dnl Check for perl stuff for doc generation and core regression testsuite
@@ -304,8 +313,8 @@ if test "x$developer" != xno; then
   elif test "x$ac_cv_prog_cc_g" = xyes; then
     CFLAGS="${CFLAGS} -g"
   fi
-  AC_DEFINE_UNQUOTED([DEBUG_RCU], 1, [liburcu verification checks])
-  AC_DEFINE_UNQUOTED([RCU_DEBUG], 1, [liburcu verification checks])
+  AC_DEFINE([DEBUG_RCU], 1, [liburcu verification checks])
+  AC_DEFINE([RCU_DEBUG], 1, [liburcu verification checks])
 else
   if test "x$ac_cv_c_compiler_gnu" = xyes; then
     CFLAGS="${CFLAGS} ${GCC_WARNFLAGS}"
@@ -375,6 +384,7 @@ dnl Summary output for the user
 
 if test "x$developer" != xno; then CFSUM_DEV=Yes; else CFSUM_DEV=No; fi
 if test "x$USE_LINUX_CAPS" = x1; then CFSUM_CAP=Yes; else CFSUM_CAP=No; fi
+if test "x$HAS_SENDMMSG" = x1; then CFSUM_SENDMMSG=Yes; else CFSUM_SENDMMSG=No; fi
 if test "x$USE_INOTIFY" = x1; then CFSUM_INOTIFY=Yes; else CFSUM_INOTIFY=No; fi
 if test "x$HAVE_QSBR" = x1; then
     CFSUM_QSBR=Yes
@@ -392,6 +402,7 @@ echo "| Configuration Summary:"
 echo "| Developer Build?        $CFSUM_DEV"
 echo "| Userspace-rcu support:  $CFSUM_QSBR"
 echo "| Linux libcap support:   $CFSUM_CAP"
+echo "| Linux sendmmsg support: $CFSUM_SENDMMSG"
 echo "| Linux inotify support:  $CFSUM_INOTIFY"
 echo "| Test Port Start:        $CFSUM_TP"
 echo "======================================="
