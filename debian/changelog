@@ -1,4 +1,4 @@
-gdnsd (1.8.0-1) experimental; urgency=low
+gdnsd (1.8.0-1) unstable; urgency=low
 
   * New upstream release.
   * Limit the Architecture set to architectures supporting unaligned accesses,
