@@ -1,5 +1,5 @@
 AC_PREREQ([2.69])
-AC_INIT([gdnsd],[1.8.0],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
+AC_INIT([gdnsd],[1.8.1],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
 AC_CONFIG_SRCDIR([gdnsd/main.c])
 AC_CONFIG_AUX_DIR([acaux])
 AM_INIT_AUTOMAKE([1.11.6 dist-xz no-dist-gzip foreign tar-ustar -Wall])
@@ -21,11 +21,6 @@ dnl   feature, so we may as well double-check here for future-proofing
 AC_C_VARARRAYS
 if test "x$ac_cv_c_vararrays" = xno; then
     AC_MSG_ERROR([Your compiler lacks support for variable arrays])
-fi
-
-AX_CHECK_ALIGNED_ACCESS_REQUIRED
-if test "$ax_cv_have_aligned_access_required" = yes ; then
-    AC_MSG_ERROR([This code is broken on your platform due to unaligned memory access])
 fi
 
 dnl POSIX threads stuff
