@@ -15,7 +15,7 @@ Vcs-Browser: https://github.com/paravoid/gdnsd
 Vcs-Git: git://github.com/paravoid/gdnsd.git
 
 Package: gdnsd
-Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 armhf arm64 powerpc ppc64 s390 s390x
+Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, adduser
 Suggests: geoip-database
 Description: authoritative domain name server
@@ -30,7 +30,7 @@ Description: authoritative domain name server
  This package provides the core gdnsd daemon and basic plugins.
 
 Package: gdnsd-dbg
-Architecture: amd64 i386 kfreebsd-amd64 kfreebsd-i386 armhf arm64 powerpc ppc64 s390 s390x
+Architecture: any
 Depends: gdnsd (= ${binary:Version}), ${misc:Depends}
 Section: debug
 Priority: extra

@@ -1,6 +1,7 @@
 gdnsd (1.8.1-1) unstable; urgency=low
 
   * New upstream release.
+    - Set Architecture to "any" again as unaligned access issues were fixed.
 
  -- Faidon Liambotis <paravoid@debian.org>  Fri, 22 Mar 2013 14:24:59 +0200
 
