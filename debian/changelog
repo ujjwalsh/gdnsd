@@ -4,6 +4,9 @@ gdnsd (1.8.2-1) unstable; urgency=low
     - Fixes FTBFS on sparc64, thanks to Aurelien Jarno for the help.
     - Test suite more resilient to slow build hosts, helps with a couple of
       FTBFS on slow architectures (e.g. sh4).
+  * Drop dependency on libnet-dns-perl & update debian/copyright. Newer
+    Net::DNS versions broke the internal API, gdnsd now bundles parts of 0.68
+    for the test suite.
 
  -- Faidon Liambotis <paravoid@debian.org>  Sun, 12 May 2013 10:36:15 +0300
 
