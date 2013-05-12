@@ -1,6 +1,6 @@
 Summary: Authoritative DNS Server
 Name: gdnsd
-Version: 1.8.1
+Version: 1.8.2
 Release: 1%{?dist}
 License: GPLv3+
 Group: System Environment/Daemons
@@ -17,7 +17,6 @@ BuildRequires: userspace-rcu-devel
 BuildRequires: libev-devel
 BuildRequires: libcap-devel
 BuildRequires: perl(Test::More)
-BuildRequires: perl(Net::DNS)
 BuildRequires: perl(HTTP::Daemon)
 BuildRequires: perl(LWP)
 BuildRequires: perl(Socket6)

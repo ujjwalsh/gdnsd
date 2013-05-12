@@ -1,8 +1,8 @@
-AC_PREREQ([2.69])
-AC_INIT([gdnsd],[1.8.1],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
+AC_PREREQ([2.68])
+AC_INIT([gdnsd],[1.8.2],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
 AC_CONFIG_SRCDIR([gdnsd/main.c])
 AC_CONFIG_AUX_DIR([acaux])
-AM_INIT_AUTOMAKE([1.11.6 dist-xz no-dist-gzip foreign tar-ustar -Wall])
+AM_INIT_AUTOMAKE([1.11.3 dist-xz no-dist-gzip foreign tar-ustar -Wall])
 AC_CONFIG_MACRO_DIR([m4])
 AM_SILENT_RULES([yes])
 
@@ -247,7 +247,6 @@ AC_CHECK_FUNCS([inotify_init1],,[USE_INOTIFY=0])
 if test $USE_INOTIFY -eq 1; then
     AC_DEFINE([USE_INOTIFY], [1], [Linux 2.6.36+ inotify support])
 fi
-AM_CONDITIONAL([USE_INOTIFY], [test x$USE_INOTIFY = x1])
 
 dnl Check for perl stuff for doc generation and core regression testsuite
 HAVE_TESTSUITE_MODULES=0
@@ -256,7 +255,7 @@ AC_PATH_PROG([PERL],[perl],[$am_aux_dir/noperl])
 AC_PATH_PROG([POD2MAN],[pod2man],[$am_aux_dir/noperl])
 AC_PATH_PROG([POD2TEXT],[pod2text],[$am_aux_dir/noperl])
 AX_PROG_PERL_VERSION([5.8.1],[
-    AX_PROG_PERL_MODULES([Test::More Net::DNS=0.63 LWP=5.805 Socket6 IO::Socket::INET6 HTTP::Daemon],[HAVE_TESTSUITE_MODULES=1], AC_MSG_WARN([[Cannot "make check" without Perl modules Test::More (aka Test-Simple for some package managers), Net::DNS 0.63+, LWP (aka libwww-perl) 5.805+, Socket6, IO::Socket::INET6, and HTTP::Daemon]]))
+    AX_PROG_PERL_MODULES([Test::More LWP=5.805 Socket6 IO::Socket::INET6 HTTP::Daemon],[HAVE_TESTSUITE_MODULES=1], AC_MSG_WARN([[Cannot "make check" without Perl modules Test::More (aka Test-Simple for some package managers), LWP (aka libwww-perl) 5.805+, Socket6, IO::Socket::INET6, and HTTP::Daemon]]))
 ],[
     AC_MSG_WARN([Cannot "make check" or (re-)generate documentation without perl 5.8.1+ (neither of which are strictly necessary to build and install from a tarball)])
 ])
@@ -264,9 +263,9 @@ AC_SUBST([HAVE_TESTSUITE_MODULES])
 
 dnl Find ragel
 AC_REQUIRE_AUX_FILE([noragel])
-AC_MSG_CHECKING([for Ragel v6.6 or v6.7]);
+AC_MSG_CHECKING([for Ragel v6.x]);
 AC_PATH_PROGS_FEATURE_CHECK([RAGEL], [ragel],
-  [[$ac_path_RAGEL --version |$EGREP 'Ragel State Machine Compiler version 6\.(6 Dec 2009|7 May 2011)' >/dev/null && ac_cv_path_RAGEL=$ac_path_RAGEL ac_path_RAGEL_found=:]],
+  [[$ac_path_RAGEL --version |$EGREP 'Ragel State Machine Compiler version 6\.' >/dev/null && ac_cv_path_RAGEL=$ac_path_RAGEL ac_path_RAGEL_found=:]],
   [ac_cv_path_RAGEL=$am_aux_dir/noragel])
 AC_SUBST([RAGEL], [$ac_cv_path_RAGEL])
 AC_MSG_RESULT([$ac_cv_path_RAGEL])
@@ -336,7 +335,8 @@ AS_HELP_STRING([--with-rootdir=/some/path],[Enables default chroot operation usi
 ],[
   with_rootdir="system"
 ])
-AC_DEFINE_UNQUOTED([GDNSD_DEF_ROOTDIR],"$with_rootdir",[Default -d argument])
+AC_SUBST([GDNSD_DEF_ROOTDIR])
+AM_CONDITIONAL([HAS_DEF_ROOTDIR], [test "x$GDNSD_DEF_ROOTDIR" = xsystem])
 
 dnl Allow specifying an alternate rundir (default $localstatedir/run) for distros
 dnl   that prefer e.g. /run to /var/run

@@ -310,6 +310,9 @@ static void process_listen(const vscf_data_t* listen_opt, const unsigned def_dns
     anysin_t temp_asin;
 
     if(!listen_opt || !vscf_array_get_len(listen_opt)) {
+        const bool has_v6 = gdnsd_tcp_v6_ok();
+        bool v6_warned = false;
+
         struct ifaddrs* ifap;
         if(getifaddrs(&ifap))
             dmn_log_fatal("getifaddrs() for defaulted DNS listeners failed: %s", logf_errno());
@@ -320,6 +323,13 @@ static void process_listen(const vscf_data_t* listen_opt, const unsigned def_dns
                 continue;
 
             if(ifap->ifa_addr->sa_family == AF_INET6) {
+                if(!has_v6) {
+                    if(!v6_warned) {
+                        dmn_log_info("Default interface-scanning (no explicit listen-address config) on this host detected one or more IPv6 interfaces, but IPv6 appears to be non-functional on this host in general, so they will be ignored...");
+                        v6_warned = true;
+                    }
+                    continue;
+                }
                 memcpy(&temp_asin.sin6, ifap->ifa_addr, sizeof(struct sockaddr_in6));
                 temp_asin.len = sizeof(struct sockaddr_in6);
             }
@@ -436,14 +446,14 @@ static const vscf_data_t* conf_load_vscf(void) {
 
     struct stat cfg_stat;
     if(!stat(cfg_path, &cfg_stat)) {
-        log_debug("Loading configuration from '%s'", cfg_path);
+        log_info("Loading configuration from '%s'", cfg_path);
         char* vscf_err;
         out = vscf_scan_filename(cfg_path, &vscf_err);
         if(!out)
-            log_fatal("Configuration from '%s' failed: %s", cfg_path, vscf_err);
+            log_fatal("Loading configuration from '%s' failed: %s", cfg_path, vscf_err);
     }
     else {
-        log_debug("No config file at '%s', using defaults + zones auto-scan", cfg_path);
+        log_info("No config file at '%s', using defaults", cfg_path);
     }
 
     free(cfg_path);
