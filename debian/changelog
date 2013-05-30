@@ -7,8 +7,10 @@ gdnsd (1.8.2-1) unstable; urgency=low
   * Drop dependency on libnet-dns-perl & update debian/copyright. Newer
     Net::DNS versions broke the internal API, gdnsd now bundles parts of 0.68
     for the test suite.
+  * Switch liburcu-dev build-dependency to linux-any as it was fixed in the
+    meantime.
 
- -- Faidon Liambotis <paravoid@debian.org>  Sun, 12 May 2013 10:36:15 +0300
+ -- Faidon Liambotis <paravoid@debian.org>  Thu, 30 May 2013 15:25:54 +0300
 
 gdnsd (1.8.1-1) unstable; urgency=low
 

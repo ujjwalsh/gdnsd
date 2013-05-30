@@ -5,7 +5,7 @@ Maintainer: Faidon Liambotis <paravoid@debian.org>
 Build-Depends: debhelper (>= 9), dh-autoreconf, libltdl-dev, perl,
  ragel, libev-dev,
  libcap-dev [linux-any],
- liburcu-dev [i386 amd64 powerpc ppc64 powerpcspe s390 s390x sparc alpha armhf],
+ liburcu-dev [linux-any],
  libsocket6-perl, libio-socket-inet6-perl,
  libwww-perl, libhttp-daemon-perl,
  geoip-database
