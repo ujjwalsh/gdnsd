@@ -1,4 +1,4 @@
-gdnsd (1.8.2-1) unstable; urgency=low
+gdnsd (1.8.3-1) unstable; urgency=low
 
   * New upstream release.
     - Fixes FTBFS on sparc64, thanks to Aurelien Jarno for the help.
@@ -10,7 +10,7 @@ gdnsd (1.8.2-1) unstable; urgency=low
   * Switch liburcu-dev build-dependency to linux-any as it was fixed in the
     meantime.
 
- -- Faidon Liambotis <paravoid@debian.org>  Thu, 30 May 2013 15:25:54 +0300
+ -- Faidon Liambotis <paravoid@debian.org>  Sat, 01 Jun 2013 18:14:02 +0300
 
 gdnsd (1.8.1-1) unstable; urgency=low
 
