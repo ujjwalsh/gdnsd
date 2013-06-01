@@ -1,5 +1,5 @@
 AC_PREREQ([2.68])
-AC_INIT([gdnsd],[1.8.2],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
+AC_INIT([gdnsd],[1.8.3],[blblack@gmail.com],[gdnsd],[https://github.com/blblack/gdnsd])
 AC_CONFIG_SRCDIR([gdnsd/main.c])
 AC_CONFIG_AUX_DIR([acaux])
 AM_INIT_AUTOMAKE([1.11.3 dist-xz no-dist-gzip foreign tar-ustar -Wall])
@@ -335,6 +335,7 @@ AS_HELP_STRING([--with-rootdir=/some/path],[Enables default chroot operation usi
 ],[
   with_rootdir="system"
 ])
+GDNSD_DEF_ROOTDIR=$with_rootdir
 AC_SUBST([GDNSD_DEF_ROOTDIR])
 AM_CONDITIONAL([HAS_DEF_ROOTDIR], [test "x$GDNSD_DEF_ROOTDIR" = xsystem])
 
