@@ -1,4 +1,4 @@
 version=3
 
 # track only even-numbered (stable) releases
-http://downloads.gdnsd.net/ gdnsd-(\d\.\d*[023468]\.\d+).tar.xz
+http://downloads.gdnsd.net/ gdnsd-(\d\.\d+\.\d+).tar.xz
