@@ -207,7 +207,7 @@ static void tcp_read_handler(struct ev_loop* loop, ev_io* io, const int revents 
     }
 
     ev_io_stop(loop, tdata->read_watcher);
-    *(uint16_t*)tdata->buffer = htons(tdata->size);
+    gdnsd_put_una16(htons(tdata->size), tdata->buffer);
     tdata->size += 2;
     tdata->size_done = 0;
     tdata->state = WRITING;
@@ -234,7 +234,7 @@ static void accept_handler(struct ev_loop* loop, ev_io* io, const int revents V_
 
     const int sock = accept(io->fd, &asin->sa, &asin->len);
 
-    if(unlikely(sock == -1)) {
+    if(unlikely(sock < 0)) {
         free(asin);
         switch(errno) {
             case EAGAIN:
@@ -317,7 +317,7 @@ int tcp_listen_pre_setup(const anysin_t* asin, const int timeout V_UNUSED) {
     dmn_assert(isv6 || asin->sa.sa_family == AF_INET);
 
     const int sock = socket(isv6 ? PF_INET6 : PF_INET, SOCK_STREAM, gdnsd_getproto_tcp());
-    if(sock == -1) log_fatal("Failed to create IPv%c TCP socket: %s", isv6 ? '6' : '4', logf_errno());
+    if(sock < 0) log_fatal("Failed to create IPv%c TCP socket: %s", isv6 ? '6' : '4', logf_errno());
 
     if(fcntl(sock, F_SETFL, (fcntl(sock, F_GETFL, 0)) | O_NONBLOCK) == -1)
         log_fatal("Failed to set O_NONBLOCK on TCP socket: %s", logf_errno());
@@ -328,7 +328,7 @@ int tcp_listen_pre_setup(const anysin_t* asin, const int timeout V_UNUSED) {
 
 #ifdef TCP_DEFER_ACCEPT
     const int opt_timeout = timeout;
-    if(setsockopt(sock, SOL_TCP, TCP_DEFER_ACCEPT, &opt_timeout, sizeof opt_timeout) == - 1)
+    if(setsockopt(sock, SOL_TCP, TCP_DEFER_ACCEPT, &opt_timeout, sizeof opt_timeout) == -1)
         log_fatal("Failed to set TCP_DEFER_ACCEPT on TCP socket: %s", logf_errno());
 #endif
 
@@ -432,7 +432,7 @@ void* dnsio_tcp_start(void* addrconf_asvoid) {
     pthread_cleanup_push(thread_clean, NULL);
 
     struct ev_prepare* prep_watcher = malloc(sizeof(struct ev_prepare));
-    struct ev_check* check_watcher = malloc(sizeof(struct ev_prepare));
+    struct ev_check* check_watcher = malloc(sizeof(struct ev_check));
     ev_prepare_init(prep_watcher, ztstate_offline);
     ev_check_init(check_watcher, ztstate_online);
     ev_set_priority(check_watcher, EV_MAXPRI);

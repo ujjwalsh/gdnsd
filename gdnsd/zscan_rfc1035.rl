@@ -149,7 +149,7 @@ static void validate_lhs_not_ooz(zscan_t* z) {
 
 F_NONNULL
 static void dname_set(zscan_t* z, uint8_t* dname, unsigned len, bool lhs) {
-    dmn_assert(z); dmn_assert(dname); dmn_assert(z->zone->dname); dmn_assert(z->origin);
+    dmn_assert(z); dmn_assert(dname); dmn_assert(z->zone->dname);
     dname_status_t catstat;
     dname_status_t status;
 
@@ -686,7 +686,7 @@ static void close_paren(zscan_t* z) {
     statement = rr | cmd;
     main := (statement? ws? ((slc? nl) when !in_paren))*;
 
-    write data nofinal;
+    write data;
 }%%
 
 F_NONNULL
@@ -726,8 +726,15 @@ static void scanner(zscan_t* z, char* buf, const unsigned bufsize, const int fd)
             write exec;
         }%%
 
-        if(cs == zone_error)
-            parse_error_noargs("unparseable");
+        if(cs == zone_error) {
+            parse_error_noargs("General parse error");
+        }
+        else if(eof && cs < zone_first_final) {
+            if(eof > buf && *(eof - 1) != '\n')
+                parse_error_noargs("Trailing incomplete or unparseable record at end of file (missing newline at end of file?)");
+            else
+                parse_error_noargs("Trailing incomplete or unparseable record at end of file");
+        }
     }
 }
 
@@ -770,7 +777,7 @@ bool zscan_rfc1035(zone_t* zone, const char* fn) {
         struct stat fdstat;
         if(!fstat(fd, &fdstat)) {
 #ifdef HAVE_POSIX_FADVISE
-            posix_fadvise(fd, 0, fdstat.st_size, POSIX_FADV_SEQUENTIAL);
+            (void)posix_fadvise(fd, 0, fdstat.st_size, POSIX_FADV_SEQUENTIAL);
 #endif
             if(fdstat.st_size < (int)bufsize)
                 bufsize = fdstat.st_size;

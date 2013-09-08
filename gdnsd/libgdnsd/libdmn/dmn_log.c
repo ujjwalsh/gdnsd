@@ -174,6 +174,8 @@ void dmn_log_close_alt_stderr(void) {
 /*** The core logging funcs: dmn_loggerv and dmn_logger **********/
 /*****************************************************************/
 
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
+
 void dmn_loggerv(int level, const char* fmt, va_list ap) {
     if(alt_stderr) {
 #ifndef NDEBUG
