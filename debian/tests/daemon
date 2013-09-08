@@ -1,0 +1,10 @@
+#!/bin/sh
+
+set -e
+
+if pidof -x gdnsd > /dev/null; then
+    echo "OK"
+else
+    echo "ERROR: gdnsd is not running"
+    exit 1
+fi
