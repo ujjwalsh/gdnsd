@@ -1,3 +1,11 @@
+gdnsd (1.10.0-1) unstable; urgency=low
+
+  * New upstream release.
+    - Fixes test suite failure when building as root. (Closes: #711872)
+  * Update Homepage field & watch file to point to the new homepage.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Sun, 08 Sep 2013 04:45:55 +0300
+
 gdnsd (1.9.0-1) unstable; urgency=low
 
   * New upstream release.

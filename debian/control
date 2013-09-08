@@ -10,7 +10,7 @@ Build-Depends: debhelper (>= 9), dh-autoreconf, libltdl-dev, perl,
  libwww-perl, libhttp-daemon-perl,
  geoip-database
 Standards-Version: 3.9.4
-Homepage: https://github.com/blblack/gdnsd
+Homepage: http://gdnsd.org/
 Vcs-Browser: https://github.com/paravoid/gdnsd
 Vcs-Git: git://github.com/paravoid/gdnsd.git
 
