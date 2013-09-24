@@ -49,7 +49,7 @@ Description: authoritative domain name server (debugging symbols)
 Package: gdnsd-dev
 Architecture: all
 Depends: ${misc:Depends}
-Section: devel
+Section: libdevel
 Priority: extra
 Description: authoritative domain name server (development files)
  gdnsd is an Authoritative-only DNS server. The initial g stands for
