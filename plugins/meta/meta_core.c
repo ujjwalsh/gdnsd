@@ -439,6 +439,8 @@ mon_list_t* CB_LOAD_CONFIG(const vscf_data_t* config) {
         resource_t* res = &resources[i];
         const char* res_name = vscf_hash_get_key_byindex(resources_cfg, i, NULL);
         vscf_data_t* res_cfg = (vscf_data_t*)vscf_hash_get_data_byindex(resources_cfg, i);
+        if(!vscf_is_hash(res_cfg))
+            log_fatal("plugin_" PNSTR ": the value of resource '%s' must be a hash", res_name);
         vscf_hash_inherit_all(config, res_cfg, true);
         make_resource(res, res_name, res_cfg);
     }
@@ -504,8 +506,11 @@ bool CB_RES_A(unsigned threadnum V_UNUSED, unsigned resnum, const client_info_t*
         }
     }
 
-    // we're assuming here the child plugins don't really do edns scope mask stuff...
-    result->edns_scope_mask = scope_mask_out;
+    // if both our map_get_dclist() and the subplugin tried to set a scope,
+    //   we take the narrower of the two.  If either did not set a scope,
+    //   their respective values will be zero, which also works out fine here.
+    if(scope_mask_out > result->edns_scope_mask)
+        result->edns_scope_mask = scope_mask_out;
 
     return rv;
 }
@@ -545,8 +550,11 @@ void CB_RES_C(unsigned threadnum V_UNUSED, unsigned resnum, const uint8_t* origi
     }
     dmn_assert(dname_status(result->dname) == DNAME_VALID);
 
-    // we're assuming here the child plugins don't really do edns scope mask stuff...
-    result->edns_scope_mask = scope_mask_out;
+    // if both our map_get_dclist() and the subplugin tried to set a scope,
+    //   we take the narrower of the two.  If either did not set a scope,
+    //   their respective values will be zero, which also works out fine here.
+    if(scope_mask_out > result->edns_scope_mask)
+        result->edns_scope_mask = scope_mask_out;
 }
 #endif
 

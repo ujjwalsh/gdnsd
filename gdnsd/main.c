@@ -54,21 +54,16 @@
 F_NONNULL
 static void syserr_for_ev(const char* msg) { dmn_assert(msg); log_fatal("%s: %s", msg, logf_errno()); }
 
-static pthread_t* io_threadids = NULL; // TCP/UDP threads
 static pthread_t zone_data_threadid;
 
 static void threads_cleanup(void) {
-    dmn_assert(io_threadids);
-
-    unsigned num_threads = gconfig.num_io_threads;
-
     pthread_cancel(zone_data_threadid);
-    for(unsigned i = 0; i < num_threads; i++)
-        pthread_cancel(io_threadids[i]);
+    for(unsigned i = 0; i < gconfig.num_dns_threads; i++)
+        pthread_cancel(gconfig.dns_threads[i].threadid);
 
     pthread_join(zone_data_threadid, NULL);
-    for(unsigned i = 0; i < num_threads; i++)
-        pthread_join(io_threadids[i], NULL);
+    for(unsigned i = 0; i < gconfig.num_dns_threads; i++)
+        pthread_join(gconfig.dns_threads[i].threadid, NULL);
 }
 
 F_NONNULL
@@ -96,7 +91,9 @@ F_NONNULL F_NORETURN
 static void usage(const char* argv0) {
     fprintf(stderr,
         PACKAGE_NAME " version " PACKAGE_VERSION "\n"
-        "Usage: %s [-d <rootdir> ] <action>\n"
+        "Usage: %s [-s] [-S] [-d <rootdir>] <action>\n"
+        "  -s - Force 'zones_strict_startup = true' for this invocation\n"
+        "  -S - Force 'zones_strict_data = true' for this invocation\n"
         "  -d <rootdir> - Use the given directory as the daemon chroot.  The\n"
         "     special value 'system' uses system default paths with no chroot.\n"
         "     The default for this build is '%s'.  See gdnsd(8) for more info.\n"
@@ -212,23 +209,16 @@ static void start_threads(void) {
     pthread_attr_setdetachstate(&attribs, PTHREAD_CREATE_JOINABLE);
     pthread_attr_setscope(&attribs, PTHREAD_SCOPE_SYSTEM);
 
-    unsigned num_addrs = gconfig.num_dns_addrs;
-    io_threadids = calloc(gconfig.num_io_threads, sizeof(pthread_t));
-
-    // Start UDP threads
-    for(uintptr_t i = 0; i < num_addrs; i++) {
-        const dns_addr_t* addrconf = &gconfig.dns_addrs[i];
-        int pthread_err = pthread_create(&io_threadids[addrconf->udp_threadnum], &attribs, &dnsio_udp_start, (void*)addrconf);
-        if(pthread_err) log_fatal("pthread_create() of UDP DNS thread failed: %s", logf_errnum(pthread_err));
-    }
-
-    // Start TCP threads
-    for(uintptr_t i = 0; i < num_addrs; i++) {
-        const dns_addr_t* addrconf = &gconfig.dns_addrs[i];
-        if(!addrconf->tcp_disabled) {
-            int pthread_err = pthread_create(&io_threadids[addrconf->tcp_threadnum], &attribs, &dnsio_tcp_start, (void*)addrconf);
-            if(pthread_err) log_fatal("pthread_create() of TCP DNS thread failed: %s", logf_errnum(pthread_err));
-        }
+    for(unsigned i = 0; i < gconfig.num_dns_threads; i++) {
+        int pthread_err;
+        dns_thread_t* t = &gconfig.dns_threads[i];
+        if(t->is_udp)
+            pthread_err = pthread_create(&t->threadid, &attribs, &dnsio_udp_start, (void*)t);
+        else
+            pthread_err = pthread_create(&t->threadid, &attribs, &dnsio_tcp_start, (void*)t);
+        if(pthread_err)
+            log_fatal("pthread_create() of DNS thread %u (for %s:%s) failed: %s",
+                i, t->is_udp ? "UDP" : "TCP", logf_anysin(&t->ac->addr), logf_errnum(pthread_err));
     }
 
     int pthread_err = pthread_create(&zone_data_threadid, &attribs, &zone_data_runtime, NULL);
@@ -382,29 +372,46 @@ static action_t match_action(const char* arg) {
     return ACT_UNDEF;
 }
 
-static action_t parse_args(const int argc, char** argv, const char** rootdir_out) {
+typedef struct {
+    const char* rootdir;
+    bool force_zss;
+    bool force_zsd;
+} cmdline_opts_t;
+
+F_NONNULL
+static action_t parse_args(const int argc, char** argv, cmdline_opts_t* copts) {
     action_t action = ACT_UNDEF;
 
-    *rootdir_out = NULL;
-
-    switch(argc) {
-        case 4: // gdnsd -d x foo
-            if(strcmp(argv[1], "-d")) usage(argv[0]);
-            *rootdir_out = argv[2];
-            action = match_action(argv[3]);
-            break;
-        case 2: // gdnsd foo
-            action = match_action(argv[1]);
-            break;
+    int optchar;
+    while((optchar = getopt(argc, argv, "d:sS"))) {
+        switch(optchar) {
+            case 'd':
+                copts->rootdir = optarg;
+                break;
+            case 's':
+                copts->force_zss = true;
+                break;
+            case 'S':
+                copts->force_zsd = true;
+                break;
+            case -1:
+                if(optind != (argc - 1))
+                    usage(argv[0]);
+                action = match_action(argv[optind]);
+                if(action == ACT_UNDEF)
+                    usage(argv[0]);
+                return action;
+                break;
+            default:
+                usage(argv[0]);
+                break;
+        }
     }
 
-    if(action == ACT_UNDEF)
-        usage(argv[0]);
-
-    return action;
+    usage(argv[0]);
 }
 
-static void init_config(const bool started_as_root) {
+static void init_config(const bool started_as_root, const cmdline_opts_t* copts) {
     // Initialize net stuff in libgdnsd (protoents, tcp_v6_ok)
     gdnsd_init_net();
 
@@ -412,14 +419,14 @@ static void init_config(const bool started_as_root) {
     gdnsd_rand_meta_init();
 
     // Actually load the config
-    conf_load();
+    conf_load(copts->force_zss, copts->force_zsd);
 
     // Set up and validate privdrop info if necc
     if(started_as_root)
         dmn_secure_setup(gconfig.username, gdnsd_get_rootdir());
 
     // Call plugin full_config actions
-    gdnsd_plugins_action_full_config(gconfig.num_io_threads);
+    gdnsd_plugins_action_full_config(gconfig.num_dns_threads);
 
     log_info("Loading zone data...");
     ztree_init();
@@ -432,8 +439,12 @@ int main(int argc, char** argv) {
     // Parse args, getting the libgdnsd rootdir and
     //   returning the action.  Exits on cmdline errors,
     //   does not use libdmn assert/log stuff.
-    const char* rootdir_arg = NULL;
-    action_t action = parse_args(argc, argv, &rootdir_arg);
+    cmdline_opts_t copts = {
+        .rootdir = NULL,
+        .force_zss = false,
+        .force_zsd = false,
+    };
+    action_t action = parse_args(argc, argv, &copts);
 
     // will we daemonize? startfg doesn't count...
     bool will_daemonize = false;
@@ -454,7 +465,7 @@ int main(int argc, char** argv) {
     dmn_init_log(PACKAGE_NAME, !will_daemonize);
 
     // set the rootdir
-    gdnsd_set_rootdir(rootdir_arg);
+    gdnsd_set_rootdir(copts.rootdir);
 
     // Start syslog (in addition to stderr) logging immediately
     //   in cases leading to daemonized daemon start
@@ -495,7 +506,7 @@ int main(int argc, char** argv) {
 
     // Initializes basic libgdnsd stuff, loads config file, loads zones,
     //   configures plugins all the way through full_config()
-    init_config(started_as_root);
+    init_config(started_as_root, &copts);
 
     if(action == ACT_CHECKCFG) {
         log_info("Configuration and zone data loads just fine");
