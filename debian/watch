@@ -1,4 +1,3 @@
 version=3
 
-# track only even-numbered (stable) releases
-http://downloads.gdnsd.org/ gdnsd-(\d\.\d+\.\d+).tar.xz
+https://github.com/blblack/gdnsd/releases/ download/.+/gdnsd-(\d\.\d+\.\d+).tar.xz

@@ -1,3 +1,11 @@
+gdnsd (1.11.1-1) unstable; urgency=medium
+
+  * New upstream release.
+    - Fixes a FTBFS on Ubuntu/i386 & Ubuntu/ppc64el.
+  * Point debian/watch to github again, per upstream's NEWS.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Thu, 13 Feb 2014 19:30:00 +0200
+
 gdnsd (1.11.0-1) unstable; urgency=medium
 
   * New upstream release.
