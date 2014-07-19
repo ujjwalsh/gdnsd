@@ -1,3 +1,9 @@
+gdnsd (1.11.4-1) unstable; urgency=high
+
+  * New upstream release.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Sat, 19 Jul 2014 10:57:10 +0300
+
 gdnsd (1.11.2-1) unstable; urgency=medium
 
   * New upstream release.
