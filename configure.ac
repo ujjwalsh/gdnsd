@@ -1,8 +1,8 @@
 AC_PREREQ([2.63])
-AC_INIT([gdnsd],[1.11.2],[blblack@gmail.com],[gdnsd])
+AC_INIT([gdnsd],[1.11.4],[blblack@gmail.com],[gdnsd])
 AC_CONFIG_SRCDIR([gdnsd/main.c])
 AC_CONFIG_AUX_DIR([acaux])
-AM_INIT_AUTOMAKE([1.11.1 dist-xz no-dist-gzip foreign tar-ustar subdir-objects -Wall])
+AM_INIT_AUTOMAKE([1.11.1 dist-xz no-dist-gzip foreign tar-ustar -Wall])
 AC_CONFIG_MACRO_DIR([m4])
 AM_SILENT_RULES([yes])
 
@@ -342,7 +342,7 @@ AS_HELP_STRING([--with-rootdir=/some/path],[Enables default chroot operation usi
 ])
 GDNSD_DEF_ROOTDIR=$with_rootdir
 AC_SUBST([GDNSD_DEF_ROOTDIR])
-AM_CONDITIONAL([HAS_DEF_ROOTDIR], [test "x$GDNSD_DEF_ROOTDIR" = xsystem])
+AM_CONDITIONAL([HAS_DEF_ROOTDIR], [test "x$GDNSD_DEF_ROOTDIR" != xsystem])
 
 dnl Allow specifying an alternate rundir (default $localstatedir/run) for distros
 dnl   that prefer e.g. /run to /var/run
@@ -369,6 +369,7 @@ AC_CONFIG_FILES([
   Makefile
   gdnsd/Makefile
   gdnsd/libgdnsd/Makefile
+  gdnsd/libgdnsd/libdmn/Makefile
   t/Makefile
   docs/Makefile
   plugins/Makefile

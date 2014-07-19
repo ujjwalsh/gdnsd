@@ -300,10 +300,13 @@ static bool dns_addr_is_dupe(const anysin_t* new_addr) {
     dmn_assert(new_addr);
     dmn_assert(new_addr->sa.sa_family == AF_INET6 || new_addr->sa.sa_family == AF_INET);
 
-    for(unsigned i = 0; i < gconfig.num_dns_addrs; i++)
-        if(gconfig.dns_addrs[i].addr.sa.sa_family == new_addr->sa.sa_family)
+    for(unsigned i = 0; i < gconfig.num_dns_addrs; i++) {
+        if(gconfig.dns_addrs[i].addr.sa.sa_family == new_addr->sa.sa_family) {
+            dmn_assert(new_addr->len == gconfig.dns_addrs[i].addr.len);
             if(!memcmp(new_addr, &gconfig.dns_addrs[i].addr, new_addr->len))
                 return true;
+        }
+    }
 
     return false;
 }
@@ -514,18 +517,18 @@ static const vscf_data_t* conf_load_vscf(void) {
 
     struct stat cfg_stat;
     if(!stat(cfg_path, &cfg_stat)) {
-        log_info("Loading configuration from '%s'", cfg_path);
+        log_info("Loading configuration from '%s'", logf_pathname(cfg_path));
         char* vscf_err;
         out = vscf_scan_filename(cfg_path, &vscf_err);
         if(!out)
-            log_fatal("Loading configuration from '%s' failed: %s", cfg_path, vscf_err);
+            log_fatal("Loading configuration from '%s' failed: %s", logf_pathname(cfg_path), vscf_err);
         if(!vscf_is_hash(out)) {
             dmn_assert(vscf_is_array(out));
-            log_fatal("Config file '%s' cannot be an '[ array ]' at the top level", cfg_path);
+            log_fatal("Config file '%s' cannot be an '[ array ]' at the top level", logf_pathname(cfg_path));
         }
     }
     else {
-        log_info("No config file at '%s', using defaults", cfg_path);
+        log_info("No config file at '%s', using defaults", logf_pathname(cfg_path));
     }
 
     free(cfg_path);
