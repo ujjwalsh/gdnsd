@@ -1,3 +1,11 @@
+gdnsd (2.0.0-1) unstable; urgency=medium
+
+  * New major upstream release.
+    - Add reload-zones init script action, but keep reload as an alias.
+    - Remove dependency to libcap-dev.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Tue, 07 Oct 2014 16:12:36 +0300
+
 gdnsd (1.11.4-1) unstable; urgency=high
 
   * New upstream release.

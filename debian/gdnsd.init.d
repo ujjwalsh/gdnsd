@@ -39,13 +39,17 @@ case "$1" in
         log_daemon_msg "Stopping $NAME" "$NAME"
         gdnsd_cmd "$1"
         ;;
-    reload)
+    reload-zones)
         log_daemon_msg "Reloading $NAME" "$NAME"
         gdnsd_cmd "$1"
         ;;
-    force-reload|restart|condrestart|try-restart)
+    restart|condrestart|try-restart)
         log_daemon_msg "Restarting $NAME" "$NAME"
         gdnsd_cmd "$1"
+        ;;
+    force-reload)
+        log_daemon_msg "Restarting $NAME" "$NAME"
+        gdnsd_cmd restart
         ;;
     status)
         $GDNSD_CMD $1 >/dev/null 2>/dev/null
@@ -55,7 +59,7 @@ case "$1" in
         esac
         ;;
     *)
-        echo "Usage: /etc/init.d/gdnsd {start|stop|reload|force-reload|restart|condrestart|status}"
+        echo "Usage: /etc/init.d/gdnsd {start|stop|reload-zones|force-reload|restart|condrestart|status}"
         exit 1
 esac
 
