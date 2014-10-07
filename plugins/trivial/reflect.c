@@ -37,9 +37,13 @@ static const char* response_text[NUM_RTYPES] = {
     "both"
 };
 
+void plugin_reflect_load_config(vscf_data_t* config V_UNUSED, const unsigned num_threads V_UNUSED) {
+    gdnsd_dyn_addr_max(2, 2); // up to two (dns+edns) in any address family
+}
+
 // resource names (and numbers) are used by this plugin to choose
 //  one of four response types above, defaulting to "best".
-int plugin_reflect_map_resource_dyna(const char* resname) {
+int plugin_reflect_map_res(const char* resname, const uint8_t* origin V_UNUSED) {
     if(!resname)
         return RESPONSE_BEST;
 
@@ -51,46 +55,23 @@ int plugin_reflect_map_resource_dyna(const char* resname) {
     return -1;
 }
 
-bool plugin_reflect_resolve_dynaddr(unsigned threadnum V_UNUSED, unsigned resnum, const client_info_t* cinfo, dynaddr_result_t* result) {
+gdnsd_sttl_t plugin_reflect_resolve(unsigned resnum, const uint8_t* origin V_UNUSED, const client_info_t* cinfo, dyn_result_t* result) {
     dmn_assert(resnum < NUM_RTYPES);
-    dmn_assert(0 == (result->count_v4 + result->count_v6));
-    dmn_assert(result->edns_scope_mask == 0);
 
     if(resnum == RESPONSE_BOTH || resnum == RESPONSE_DNS || (resnum == RESPONSE_BEST && !cinfo->edns_client_mask)) {
-        const anysin_t* dns_client = &cinfo->dns_source;
-        if(dns_client->sa.sa_family == AF_INET6) {
-            memcpy(&result->addrs_v6[0], dns_client->sin6.sin6_addr.s6_addr, 16);
-            result->count_v6 = 1U;
-        }
-        else {
-            dmn_assert(dns_client->sa.sa_family == AF_INET);
-            result->addrs_v4[0] = dns_client->sin.sin_addr.s_addr;
-            result->count_v4 = 1U;
-        }
-        result->edns_scope_mask = cinfo->edns_client_mask;
+        gdnsd_result_add_anysin(result, &cinfo->dns_source);
+        gdnsd_result_add_scope_mask(result, cinfo->edns_client_mask);
     }
 
     if(cinfo->edns_client_mask && resnum != RESPONSE_DNS) {
-        const anysin_t* edns_client = &cinfo->edns_client;
-        if(edns_client->sa.sa_family == AF_INET6) {
-            memcpy(&result->addrs_v6[16 * result->count_v6], edns_client->sin6.sin6_addr.s6_addr, 16);
-            result->count_v6++;
-        }
-        else {
-            dmn_assert(edns_client->sa.sa_family == AF_INET);
-            result->addrs_v4[result->count_v4] = edns_client->sin.sin_addr.s_addr;
-            result->count_v4++;
-        }
-        result->edns_scope_mask = cinfo->edns_client_mask;
+        gdnsd_result_add_anysin(result, &cinfo->edns_client);
+        gdnsd_result_add_scope_mask(result, cinfo->edns_client_mask);
     }
     else if(!cinfo->edns_client_mask && resnum == RESPONSE_EDNS) {
-        dmn_assert(0 == (result->count_v4 + result->count_v6));
-        result->addrs_v4[0] = 0U;
-        result->count_v4 = 1U;
-        dmn_assert(result->edns_scope_mask == 0);
+        dmn_anysin_t tmpsin;
+        gdnsd_anysin_fromstr("0.0.0.0", 0, &tmpsin);
+        gdnsd_result_add_anysin(result, &tmpsin);
     }
 
-    dmn_assert(result->count_v4 + result->count_v6);
-
-    return true;
+    return GDNSD_STTL_TTL_MAX;
 }

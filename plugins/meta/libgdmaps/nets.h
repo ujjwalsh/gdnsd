@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,6 +26,6 @@
 #include <gdnsd/vscf.h>
 
 F_NONNULLX(2, 3)
-nlist_t* nets_make_list(const vscf_data_t* nets_cfg, dclists_t* dclists, const char* map_name);
+nlist_t* nets_make_list(vscf_data_t* nets_cfg, dclists_t* dclists, const char* map_name);
 
 #endif // NETS_H

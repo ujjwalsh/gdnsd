@@ -20,34 +20,23 @@
 #ifndef GDNSD_PATHS_PRIV_H
 #define GDNSD_PATHS_PRIV_H
 
-#include "gdnsd/compiler.h"
-#include "gdnsd/paths.h"
+#include <gdnsd/compiler.h>
+#include <gdnsd/paths.h>
+#include <stdbool.h>
 
-// Called by core daemon only, once at startup.
-//   It cleans up "rootdir_in" via realpath(), verifies
-//   existence, and does a chdir() into it.
-// From here forward, the data root dir paths
-//   are used as relative paths, e.g. "etc/config",
-//   "etc/geoip/GeoIPRegion.dat", etc...
-// (Unless the default or argument is "system", in
-//   which case we set up for unrooted execution
-//   with system default paths from autoconf)
-void gdnsd_set_rootdir(const char* rootdir_in);
+// Mostly for help output
+const char* gdnsd_get_default_config_dir(void);
 
-// Returns the realpath()-cleaned actual rootdir
-//   determined and used above.  Almost none of the
-//   code should actually need this, except the
-//   security code for chroot().
-F_PURE
-const char* gdnsd_get_rootdir(void);
+// Set config dir (e.g. from cmdline), or pass NULL to use default
+void gdnsd_set_config_dir(const char* config_dir);
 
-// this returns the compiled default (a path
-//   for chroot default, or "system", never NULL),
-//   to help with the usage() output...
-F_PURE
-const char* gdnsd_get_def_rootdir(void);
-
-// get a pathname for pidfile operations
-char* gdnsd_get_pidpath(void);
+// Set any explicitly-configured directories to non-default
+//   values.  Only supply explicit overrides!  Everything
+//   gets compiled-in defaults if NULL.
+// if check_create is false, the state/run dirs will not
+//   be checked for existence or created.  Useful for
+//   uses outside of gdnsd itself (e.g. testsuite binaries),
+//   as well as stop/status/reload-zones/checkconf actions.
+void gdnsd_set_runtime_dirs(const char* run_dir, const char* state_dir, const bool check_create);
 
 #endif // GDNSD_PATHS_PRIV_H

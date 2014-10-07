@@ -4,7 +4,7 @@
 use _GDT ();
 use FindBin ();
 use File::Spec ();
-use Test::More tests => 23;
+use Test::More tests => 24;
 
 my $standard_auth = [
     'example.com 21600 NS ns1.example.com',
@@ -99,12 +99,12 @@ _GDT->test_dns(
 
 _GDT->test_dns(
     qname => 'minttl.example.com', qtype => 'A',
-    answer => 'minttl.example.com 0 A 192.0.2.199',
+    answer => 'minttl.example.com 5 A 192.0.2.199',
 );
 
 _GDT->test_dns(
     qname => 'maxttl.example.com', qtype => 'A',
-    answer => 'maxttl.example.com 2147483647 A 192.0.2.199',
+    answer => 'maxttl.example.com 3600000 A 192.0.2.199',
 );
 
 _GDT->test_dns(
@@ -123,8 +123,8 @@ _GDT->test_dns(
 );
 
 _GDT->test_dns(
-    qname => 'split-txt.example.com', qtype => 'SPF',
-    answer => 'split-txt.example.com 21600 SPF ' . $split_txt,
+    qname => 'split-txt.example.com', qtype => 'TXT',
+    answer => 'split-txt.example.com 21600 TXT ' . $split_txt,
 );
 
 _GDT->test_dns(
@@ -155,6 +155,18 @@ _GDT->test_dns(
     qname => 'max-naptr2.example.com', qtype => 'NAPTR',
     answer => $max_naptr2,
     stats => [qw/udp_reqs udp_tc tcp_reqs noerror noerror/],
+);
+
+_GDT->test_dns(
+    qname => 'five-a.example.com', qtype => 'A',
+    answer => [
+        'five-a.example.com 21600 A 192.0.2.131',
+        'five-a.example.com 21600 A 192.0.2.132',
+        'five-a.example.com 21600 A 192.0.2.133',
+        'five-a.example.com 21600 A 192.0.2.134',
+        'five-a.example.com 21600 A 192.0.2.135',
+    ],
+    stats => [qw/udp_reqs noerror/],
 );
 
 _GDT->test_kill_daemon($pid);

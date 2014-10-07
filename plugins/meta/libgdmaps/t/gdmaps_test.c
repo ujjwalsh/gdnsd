@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -38,74 +38,55 @@
 #include <gdnsd/plugapi.h>
 #include <gdnsd/misc.h>
 
-// be evil and use the private interface to set the cfdir,
-//   since this is for test mocking and we're part of the main dist
-#include "gdnsd/paths-priv.h"
+#include <gdnsd/paths-priv.h>
 
 #include "gdmaps.h"
 #include "gdmaps_test.h"
 
-static const vscf_data_t* conf_load_vscf(void) {
-    const vscf_data_t* out = NULL;
+static vscf_data_t* conf_load_vscf(const char* cfg_dir) {
+    vscf_data_t* out = NULL;
 
+    gdnsd_set_config_dir(cfg_dir);
     char* cfg_path = gdnsd_resolve_path_cfg("config", NULL);
 
     struct stat cfg_stat;
     if(!stat(cfg_path, &cfg_stat)) {
-        log_debug("Loading configuration from '%s'", logf_pathname(cfg_path));
+        log_info("Loading configuration from '%s'", cfg_path);
         char* vscf_err;
         out = vscf_scan_filename(cfg_path, &vscf_err);
         if(!out)
-            log_fatal("Configuration from '%s' failed: %s", logf_pathname(cfg_path), vscf_err);
+            log_fatal("Configuration from '%s' failed: %s", cfg_path, vscf_err);
         if(!vscf_is_hash(out))
-            log_fatal("Configuration from '%s' failed: config was an array!", logf_pathname(cfg_path));
+            log_fatal("Configuration from '%s' failed: config was an array!", cfg_path);
     }
     else {
-        log_debug("No config file at '%s', using defaults + zones auto-scan", logf_pathname(cfg_path));
+        log_info("No config file at '%s', using defaults + zones auto-scan", cfg_path);
     }
 
     free(cfg_path);
     return out;
 }
 
-static void conf_options(const vscf_data_t* cfg_root) {
-    dmn_assert(cfg_root);
-
-    // options stanza: set dmn_debug
-    bool debug_tmp = false;
-    const vscf_data_t* options = vscf_hash_get_data_byconstkey(cfg_root, "options", true);
-    if(options) {
-        if(!vscf_is_hash(options))
-            log_fatal("Config stanza 'options' must be a hash");
-        const vscf_data_t* debug_setting = vscf_hash_get_data_byconstkey(options, "debug", false);
-        if(debug_setting
-            && (!vscf_is_simple(debug_setting)
-            || !vscf_simple_get_as_bool(debug_setting, &debug_tmp)))
-                log_fatal("Config option 'debug': value must be 'true' or 'false'");
-    }
-    dmn_set_debug(debug_tmp);
-}
-
 F_NONNULL
-static const vscf_data_t* conf_get_maps(const vscf_data_t* cfg_root) {
+static vscf_data_t* conf_get_maps(vscf_data_t* cfg_root) {
     dmn_assert(cfg_root);
 
     // plugins stanza
-    const vscf_data_t* plugins = vscf_hash_get_data_byconstkey(cfg_root, "plugins", true);
+    vscf_data_t* plugins = vscf_hash_get_data_byconstkey(cfg_root, "plugins", true);
     if(!plugins)
         log_fatal("Config file has no plugins stanza");
     if(!vscf_is_hash(plugins))
         log_fatal("Config stanza 'plugins' must be a hash");
 
     // plugins->geoip stanza
-    const vscf_data_t* geoip = vscf_hash_get_data_byconstkey(plugins, "geoip", true);
+    vscf_data_t* geoip = vscf_hash_get_data_byconstkey(plugins, "geoip", true);
     if(!geoip)
         log_fatal("Config file has no geoip plugin config");
     if(!vscf_is_hash(geoip))
         log_fatal("Plugin config for 'geoip' must be a hash");
 
     // plugins->geoip->maps stanza
-    const vscf_data_t* maps = vscf_hash_get_data_byconstkey(geoip, "maps", true);
+    vscf_data_t* maps = vscf_hash_get_data_byconstkey(geoip, "maps", true);
     if(!maps)
         log_fatal("Config file has no geoip maps defined");
     if(!vscf_is_hash(maps))
@@ -176,15 +157,12 @@ void gdmaps_test_lookup_check(const unsigned tnum, const gdmaps_t* gdmaps, const
         log_fatal("Subtest %u failed: Wanted scope mask %u, got %u", tnum, scope_cmp, scope);
 }
 
-gdmaps_t* gdmaps_test_init(const char* input_rootdir) {
+gdmaps_t* gdmaps_test_init(const char* input_cfgdir) {
 
-    dmn_init_log("gdmaps_test", true);
+    dmn_init1(false, true, true, false, "gdmaps_test");
 
-    gdnsd_set_rootdir(input_rootdir);
-    const vscf_data_t* cfg_root = conf_load_vscf();
-    conf_options(cfg_root);
-
-    const vscf_data_t* maps_cfg = conf_get_maps(cfg_root);
+    vscf_data_t* cfg_root = conf_load_vscf(input_cfgdir);
+    vscf_data_t* maps_cfg = conf_get_maps(cfg_root);
     gdmaps_t* gdmaps = gdmaps_new(maps_cfg);
     vscf_destroy(cfg_root);
 

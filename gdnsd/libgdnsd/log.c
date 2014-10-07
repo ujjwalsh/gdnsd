@@ -28,36 +28,36 @@
 #include <stdarg.h>
 #include <pthread.h>
 
-#include "gdnsd/compiler.h"
-#include "gdnsd/net.h"
-#include "gdnsd/log.h"
-#include "gdnsd/stats.h"
-#include "gdnsd/dmn.h"
-#include "gdnsd/paths-priv.h"
+#include <gdnsd/compiler.h>
+#include <gdnsd/net.h>
+#include <gdnsd/log.h>
+#include <gdnsd/stats.h>
+#include <gdnsd/dmn.h>
+#include <gdnsd/paths-priv.h>
 
 /* libdmn custom log formatters and the buffer sizes they use:
  *
- * const char* logf_anysin(const anysin_t* asin); // variable...
- * const char* logf_anysin_noport(const anysin_t* asin); // variable...
+ * const char* dmn_logf_anysin(const dmn_anysin_t* asin); // variable...
+ * const char* dmn_logf_anysin_noport(const dmn_anysin_t* asin); // variable...
  * const char* logf_dname(const uint8_t* dname); // 1024
  *
  * Usage example:
- *   anysin_t* saddr = ...;
+ *   dmn_anysin_t* saddr = ...;
  *   uint8_t*  dname = ...;
  *   int pthread_errno = ...;
  *   log_err("pthread error: %s during req for name '%s' from %s",
- *      logf_errnum(pthread_errno), logf_dname(dname), logf_anysin(saddr));
+ *      dmn_logf_strerror(pthread_errno), logf_dname(dname), dmn_logf_anysin(saddr));
  */
 
 static const char* generic_nullstr = "(null)";
 
 const char* gdnsd_logf_ipv6(const uint8_t* ipv6) {
-    anysin_t tempsin;
-    memset(&tempsin, 0, sizeof(anysin_t));
+    dmn_anysin_t tempsin;
+    memset(&tempsin, 0, sizeof(dmn_anysin_t));
     tempsin.sin.sin_family = AF_INET6;
     memcpy(tempsin.sin6.sin6_addr.s6_addr, ipv6, 16);
     tempsin.len = sizeof(struct sockaddr_in6);
-    return gdnsd_logf_anysin_noport(&tempsin);
+    return dmn_logf_anysin_noport(&tempsin);
 }
 
 const char* gdnsd_logf_in6a(const struct in6_addr* in6a) {
@@ -73,9 +73,8 @@ const char* gdnsd_logf_dname(const uint8_t* dname) {
 
     dname++; // skip initial OAL byte
 
-    unsigned llen;
     while(1) {
-        llen = *dname++;
+        unsigned llen = *dname++;
 
         // Handle terminal cases
         if(llen == 255)
@@ -106,33 +105,4 @@ const char* gdnsd_logf_dname(const uint8_t* dname) {
 
     *dnptr = '\0';
     return dnbuf;
-}
-
-const char* gdnsd_logf_pathname(const char* inpath) {
-    char* space = NULL;
-
-    if(!inpath) {
-        space = dmn_fmtbuf_alloc(7);
-        memcpy(space, "<NULL>", 7); // includes NUL
-    }
-    else {
-        const unsigned inlen = strlen(inpath);
-        const char* rootpath = gdnsd_get_rootdir();
-        if(rootpath) {
-            const unsigned rootlen = strlen(rootpath);
-            const unsigned toalloc = 1 + rootlen + 1 + 1 + inlen + 1;
-            char* space_ptr = space = dmn_fmtbuf_alloc(toalloc);
-            *space_ptr++ = '[';
-            memcpy(space_ptr, rootpath, rootlen); space_ptr += rootlen;
-            *space_ptr++ = ']';
-            *space_ptr++ = '/';
-            memcpy(space_ptr, inpath, inlen + 1); // includes NUL
-        }
-        else {
-            space = dmn_fmtbuf_alloc(inlen + 1);
-            memcpy(space, inpath, inlen + 1); // includes NUL
-        }
-    }
-
-    return space;
 }

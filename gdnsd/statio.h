@@ -21,14 +21,16 @@
 #define GDSND_STATIO_H
 
 #include "config.h"
-#include "gdnsd/compiler.h"
+#include <gdnsd/compiler.h>
+#include <stdbool.h>
 #include <ev.h>
 
-void statio_log_stats(void);
-void statio_log_uptime(void);
-
-F_NONNULL void statio_start(struct ev_loop* statio_loop);
 void statio_init(void);
+void statio_bind_socks(void);
+bool statio_check_socks(bool soft);
+
+F_NONNULL
+void statio_start(struct ev_loop* statio_loop);
 
 #endif // GDSND_STATIO_H
 

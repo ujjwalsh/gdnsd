@@ -18,6 +18,7 @@
  */
 
 #include "zsrc_djb.h"
+#include "zscan_djb.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -27,36 +28,101 @@
 
 #include "conf.h"
 #include "ltree.h"
-#include "ltarena.h"
-#include "ztree.h"
-#include "gdnsd/misc.h"
-#include "gdnsd/log.h"
+#include "main.h"
+#include <gdnsd/alloc.h>
+#include <gdnsd/log.h>
+#include <gdnsd/paths.h>
+
+static struct ev_loop* zones_loop = NULL;
+static ev_async* sigusr1_waker = NULL;
+static char* djb_dir = NULL;
+static zscan_djb_zonedata_t* active_zonedata = NULL;
 
 static void unload_zones(void) {
-    // for every zone_t created and sent to ztree earlier
-    //   during zsrc_djb_load_zones:
-    // zlist_update(z, NULL); // removes from runtime lookup
-    // zone_delete(z); // destroys actual data inside
-    // free other associated local data, if any
+    if (active_zonedata) {
+        ztree_txn_start();
+        for (zscan_djb_zonedata_t* cur = active_zonedata; cur; cur = cur->next)
+            ztree_txn_update(cur->zone, NULL);
+        ztree_txn_end();
+
+        for (zscan_djb_zonedata_t* cur = active_zonedata; cur; cur = cur->next)
+            zone_delete(cur->zone);
+
+        zscan_djbzone_free(&active_zonedata);
+    }
 }
 
-void zsrc_djb_load_zones(void) {
-    // scan input file(s):
-    //   create zone_t object for each local zone using
-    //     ztree.h:zone_new("example.com", "djb:datafile")
-    //   set zone_t->mtime from filesystem mtime.
-    //   add records to the zone_t via ltree_add_rec_*.
-    //   call zone_finalize(z) to do post-processing
-    //   call zlist_update(NULL, z); for each zone created,
-    //     which makes it available for runtime lookup
-    //   keep track of the zone_t's you created, you're
-    //   responsible for destroying them later.
-    if(atexit(unload_zones))
-        log_fatal("zsrc_djb: atexit(unload_zones) failed: %s", logf_errno());
+static void zsrc_djb_sync_zones(void) {
+    zscan_djb_zonedata_t* zonedata;
+    int num_zones = 0;
+
+    if (zscan_djb(djb_dir, &zonedata) || (!active_zonedata && !zonedata))
+        return;
+
+    ztree_txn_start();
+
+    for (zscan_djb_zonedata_t* cur = zonedata; cur; cur = cur->next) {
+        zscan_djb_zonedata_t* old = zscan_djbzone_get(active_zonedata, cur->zone->dname, 1);
+        if (old) {
+            old->marked = 1;
+            ztree_txn_update(old->zone, cur->zone);
+        } else {
+            ztree_txn_update(NULL, cur->zone);
+        }
+        num_zones++;
+    }
+
+    for (zscan_djb_zonedata_t* cur = active_zonedata; cur; cur = cur->next)
+        if (!cur->marked)
+            ztree_txn_update(cur->zone, NULL);
+
+    ztree_txn_end();
+
+    // now delete the unused zone_t's that were removed/replaced in the multi-zone
+    //   transaction above.
+    for (zscan_djb_zonedata_t* cur = zonedata; cur; cur = cur->next) {
+        zscan_djb_zonedata_t* old = zscan_djbzone_get(active_zonedata, cur->zone->dname, 1);
+        if (old)
+            zone_delete(old->zone);
+    }
+
+    for (zscan_djb_zonedata_t* cur = active_zonedata; cur; cur = cur->next)
+        if (!cur->marked)
+            zone_delete(cur->zone);
+
+    log_info("zsrc_djb: loaded %d zones from %s...", num_zones, djb_dir);
+
+    zscan_djbzone_free(&active_zonedata);
+    active_zonedata = zonedata;
 }
 
-void zsrc_djb_runtime_init(struct ev_loop* loop V_UNUSED) {
-    // for runtime reloading based on FS updates,
-    // can just no-op for now and load on startup only, above.
-    return;
+// XXX check_only could be used to optimize for the checkconf case,
+//   so long as the optimization doesn't change the validity of the check.
+void zsrc_djb_load_zones(const bool check_only V_UNUSED) {
+    djb_dir = gdnsd_resolve_path_cfg("djbdns/", NULL);
+    zsrc_djb_sync_zones();
+    gdnsd_atexit_debug(unload_zones);
+}
+
+// called within our thread/loop to take sigusr1 action
+F_NONNULL
+static void sigusr1_cb(struct ev_loop* loop V_UNUSED, ev_async* w V_UNUSED, int revents V_UNUSED) {
+    dmn_assert(loop); dmn_assert(w);
+    log_info("zsrc_djb: received SIGUSR1 notification, scanning for changes...");
+    zsrc_djb_sync_zones();
+}
+
+// called from main thread to feed ev_async
+void zsrc_djb_sigusr1(void) {
+    dmn_assert(zones_loop); dmn_assert(sigusr1_waker);
+    ev_async_send(zones_loop, sigusr1_waker);
+}
+
+void zsrc_djb_runtime_init(struct ev_loop* loop) {
+    dmn_assert(loop);
+
+    zones_loop = loop;
+    sigusr1_waker = xmalloc(sizeof(ev_async));
+    ev_async_init(sigusr1_waker, sigusr1_cb);
+    ev_async_start(loop, sigusr1_waker);
 }

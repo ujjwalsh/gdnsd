@@ -33,7 +33,7 @@
 
 typedef struct {
     const char* name;
-    unsigned long* ok_codes;
+    unsigned* ok_codes;
     char* req_data;
     unsigned req_data_len;
     unsigned num_ok_codes;
@@ -49,13 +49,14 @@ typedef enum {
 } http_state_t;
 
 typedef struct {
+    const char* desc;
     http_svc_t* http_svc;
     ev_io* read_watcher;
     ev_io* write_watcher;
     ev_timer* timeout_watcher;
     ev_timer* interval_watcher;
-    mon_smgr_t* smgr;
-    anysin_t addr;
+    unsigned idx;
+    dmn_anysin_t addr;
     char res_buf[14];
     int sock;
     http_state_t hstate;
@@ -64,7 +65,7 @@ typedef struct {
 } http_events_t;
 
 static unsigned num_http_svcs = 0;
-static unsigned int num_mons = 0;
+static unsigned num_mons = 0;
 static http_svc_t* service_types = NULL;
 static http_events_t** mons = NULL;
 
@@ -73,7 +74,7 @@ static void mon_interval_cb(struct ev_loop* loop, struct ev_timer* t, const int 
     dmn_assert(loop); dmn_assert(t);
     dmn_assert(revents == EV_TIMER);
 
-    http_events_t* md = (http_events_t*)t->data;
+    http_events_t* md = t->data;
 
     dmn_assert(md);
 
@@ -90,19 +91,19 @@ static void mon_interval_cb(struct ev_loop* loop, struct ev_timer* t, const int 
     dmn_assert(!ev_is_active(md->write_watcher));
     dmn_assert(!ev_is_active(md->timeout_watcher) && !ev_is_pending(md->timeout_watcher));
 
-    log_debug("plugin_http_status: Starting state poll of %s", md->smgr->desc);
+    log_debug("plugin_http_status: Starting state poll of %s", md->desc);
 
     do {
         const bool isv6 = md->addr.sa.sa_family == AF_INET6;
 
         const int sock = socket(isv6 ? PF_INET6 : PF_INET, SOCK_STREAM, gdnsd_getproto_tcp());
         if(unlikely(sock < 0)) {
-            log_err("plugin_http_status: Failed to create monitoring socket: %s", logf_errno());
+            log_err("plugin_http_status: Failed to create monitoring socket: %s", dmn_logf_errno());
             break;
         }
 
         if(unlikely(fcntl(sock, F_SETFL, (fcntl(sock, F_GETFL, 0)) | O_NONBLOCK) == -1)) {
-            log_err("plugin_http_status: Failed to set O_NONBLOCK on monitoring socket: %s", logf_errno());
+            log_err("plugin_http_status: Failed to set O_NONBLOCK on monitoring socket: %s", dmn_logf_errno());
             close(sock);
             break;
         }
@@ -120,7 +121,7 @@ static void mon_interval_cb(struct ev_loop* loop, struct ev_timer* t, const int 
                     case ENETUNREACH:
                         break;
                     default:
-                        log_err("plugin_http_status: Failed to connect() monitoring socket to remote server, possible local problem: %s", logf_errno());
+                        log_err("plugin_http_status: Failed to connect() monitoring socket to remote server, possible local problem: %s", dmn_logf_errno());
                 }
                 close(sock);
                 break;
@@ -138,9 +139,9 @@ static void mon_interval_cb(struct ev_loop* loop, struct ev_timer* t, const int 
     } while(0);
 
     // This is only reachable via "break"'s above, which indicate an immediate failure
-    log_debug("plugin_http_status: State poll of %s failed very quickly", md->smgr->desc);
+    log_debug("plugin_http_status: State poll of %s failed very quickly", md->desc);
     md->hstate = HTTP_STATE_WAITING;
-    gdnsd_mon_state_updater(md->smgr, false);
+    gdnsd_mon_state_updater(md->idx, false);
 }
 
 F_NONNULL
@@ -148,7 +149,7 @@ static void mon_write_cb(struct ev_loop* loop, struct ev_io* io, const int reven
     dmn_assert(loop); dmn_assert(io);
     dmn_assert(revents == EV_WRITE);
 
-    http_events_t* md = (http_events_t*)io->data;
+    http_events_t* md = io->data;
 
     dmn_assert(md);
     dmn_assert(md->hstate == HTTP_STATE_WRITING);
@@ -161,7 +162,7 @@ static void mon_write_cb(struct ev_loop* loop, struct ev_io* io, const int reven
     if(likely(!md->already_connected)) {
         // nonblocking connect() just finished, need to check status
         int so_error = 0;
-        unsigned int so_error_len = sizeof(so_error);
+        unsigned so_error_len = sizeof(so_error);
         (void)getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len);
         if(unlikely(so_error)) {
             switch(so_error) {
@@ -173,25 +174,31 @@ static void mon_write_cb(struct ev_loop* loop, struct ev_io* io, const int reven
                 case ENETUNREACH:
                     break;
                 default:
-                    log_err("plugin_http_status: Failed to connect() monitoring socket to remote server, possible local problem: %s", logf_errnum(so_error));
+                    log_err("plugin_http_status: Failed to connect() monitoring socket to remote server, possible local problem: %s", dmn_logf_strerror(so_error));
             }
 
-            log_debug("plugin_http_status: State poll of %s failed quickly: %s", md->smgr->desc, logf_errnum(so_error));
+            log_debug("plugin_http_status: State poll of %s failed quickly: %s", md->desc, dmn_logf_strerror(so_error));
             close(sock); md->sock = -1;
             ev_io_stop(loop, md->write_watcher);
             ev_timer_stop(loop, md->timeout_watcher);
             md->hstate = HTTP_STATE_WAITING;
-            gdnsd_mon_state_updater(md->smgr, false);
+            gdnsd_mon_state_updater(md->idx, false);
             return;
         }
         md->already_connected = true;
     }
 
-    const unsigned to_send = md->http_svc->req_data_len - md->done;
-    const int sent = send(sock, md->http_svc->req_data + md->done, md->http_svc->req_data_len, 0);
+    dmn_assert(md->done < md->http_svc->req_data_len);
+    const int to_send = md->http_svc->req_data_len - md->done;
+    dmn_assert(to_send > 0);
+
+    const int sent = send(sock, md->http_svc->req_data + md->done, to_send, 0);
     if(unlikely(sent == -1)) {
         switch(errno) {
             case EAGAIN:
+#if EWOULDBLOCK != EAGAIN
+            case EWOULDBLOCK:
+#endif
             case EINTR:
                 return;
             case ENOTCONN:
@@ -202,7 +209,7 @@ static void mon_write_cb(struct ev_loop* loop, struct ev_io* io, const int reven
             case EPIPE:
                 break;
             default:
-                log_err("plugin_http_status: write() to monitoring socket failed, possible local problem: %s", logf_errno());
+                log_err("plugin_http_status: write() to monitoring socket failed, possible local problem: %s", dmn_logf_errno());
         }
         shutdown(sock, SHUT_RDWR);
         close(sock);
@@ -210,9 +217,12 @@ static void mon_write_cb(struct ev_loop* loop, struct ev_io* io, const int reven
         ev_io_stop(loop, md->write_watcher);
         ev_timer_stop(loop, md->timeout_watcher);
         md->hstate = HTTP_STATE_WAITING;
-        gdnsd_mon_state_updater(md->smgr, false);
+        gdnsd_mon_state_updater(md->idx, false);
     }
-    if(unlikely(sent != (signed)to_send)) {
+
+    dmn_assert(sent <= to_send);
+
+    if(unlikely(sent != to_send)) {
         md->done += sent;
         return;
     }
@@ -229,7 +239,7 @@ static void mon_read_cb(struct ev_loop* loop, struct ev_io* io, const int revent
     dmn_assert(loop); dmn_assert(io);
     dmn_assert(revents == EV_READ);
 
-    http_events_t* md = (http_events_t*)io->data;
+    http_events_t* md = io->data;
 
     dmn_assert(md);
     dmn_assert(md->hstate == HTTP_STATE_READING);
@@ -243,6 +253,9 @@ static void mon_read_cb(struct ev_loop* loop, struct ev_io* io, const int revent
     if(unlikely(recvd == -1)) {
         switch(errno) {
             case EAGAIN:
+#if EWOULDBLOCK != EAGAIN
+            case EWOULDBLOCK:
+#endif
             case EINTR:
                 return;
             case ETIMEDOUT:
@@ -251,7 +264,7 @@ static void mon_read_cb(struct ev_loop* loop, struct ev_io* io, const int revent
             case EPIPE:
                 break;
             default:
-                log_err("plugin_http_status: read() from monitoring socket failed, possible local problem: %s", logf_errno());
+                log_err("plugin_http_status: read() from monitoring socket failed, possible local problem: %s", dmn_logf_errno());
         }
     }
     else if(recvd < to_recv) {
@@ -262,7 +275,7 @@ static void mon_read_cb(struct ev_loop* loop, struct ev_io* io, const int revent
         md->res_buf[13] = '\0';
         char code_str[4] = { 0 };
         if(1 == sscanf(md->res_buf, "HTTP/1.%*1[01]%*1[ ]%3c%*1[ ]", code_str)) {
-            unsigned long lcode = strtoul(code_str, NULL, 10);
+            unsigned lcode = (unsigned)strtoul(code_str, NULL, 10);
             for(unsigned i = 0; i < md->http_svc->num_ok_codes; i++) {
                 if(lcode == md->http_svc->ok_codes[i]) {
                     final_status = true;
@@ -275,14 +288,14 @@ static void mon_read_cb(struct ev_loop* loop, struct ev_io* io, const int revent
     // I don't believe we actually need to read the rest of the response before
     //   shutdown/close in order to avoid bad TCP behavior, but I could be wrong.
 
-    log_debug("plugin_http_status: State poll of %s %s", md->smgr->desc, final_status ? "succeeded" : "failed");
+    log_debug("plugin_http_status: State poll of %s %s", md->desc, final_status ? "succeeded" : "failed");
     shutdown(md->sock, SHUT_RDWR);
     close(md->sock);
     md->sock = -1;
     ev_io_stop(loop, md->read_watcher);
     ev_timer_stop(loop, md->timeout_watcher);
     md->hstate = HTTP_STATE_WAITING;
-    gdnsd_mon_state_updater(md->smgr, final_status);
+    gdnsd_mon_state_updater(md->idx, final_status);
 }
 
 F_NONNULL
@@ -290,7 +303,7 @@ static void mon_timeout_cb(struct ev_loop* loop, struct ev_timer* t, const int r
     dmn_assert(loop); dmn_assert(t);
     dmn_assert(revents == EV_TIMER);
 
-    http_events_t* md = (http_events_t*)t->data;
+    http_events_t* md = t->data;
 
     dmn_assert(md);
     dmn_assert(md->sock != -1);
@@ -299,19 +312,19 @@ static void mon_timeout_cb(struct ev_loop* loop, struct ev_timer* t, const int r
      || (md->hstate == HTTP_STATE_WRITING && ev_is_active(md->write_watcher))
     );
 
-    log_debug("plugin_http_status: State poll of %s timed out", md->smgr->desc);
+    log_debug("plugin_http_status: State poll of %s timed out", md->desc);
     if(md->hstate == HTTP_STATE_READING) ev_io_stop(loop, md->read_watcher);
     else if(md->hstate == HTTP_STATE_WRITING) ev_io_stop(loop, md->write_watcher);
     shutdown(md->sock, SHUT_RDWR);
     close(md->sock);
     md->sock = -1;
     md->hstate = HTTP_STATE_WAITING;
-    gdnsd_mon_state_updater(md->smgr, false);
+    gdnsd_mon_state_updater(md->idx, false);
 }
 
 #define SVC_OPT_UINT(_hash, _typnam, _loc, _min, _max) \
     do { \
-        const vscf_data_t* _data = vscf_hash_get_data_byconstkey(_hash, #_loc, true); \
+        vscf_data_t* _data = vscf_hash_get_data_byconstkey(_hash, #_loc, true); \
         if(_data) { \
             unsigned long _val; \
             if(!vscf_is_simple(_data) \
@@ -325,7 +338,7 @@ static void mon_timeout_cb(struct ev_loop* loop, struct ev_timer* t, const int r
 
 #define SVC_OPT_STR(_hash, _typnam, _loc) \
     do { \
-        const vscf_data_t* _data = vscf_hash_get_data_byconstkey(_hash, #_loc, true); \
+        vscf_data_t* _data = vscf_hash_get_data_byconstkey(_hash, #_loc, true); \
         if(_data) { \
             if(!vscf_is_simple(_data)) \
                 log_fatal("plugin_http_status: Service type '%s': option %s: Wrong type (should be string)", _typnam, #_loc); \
@@ -339,17 +352,17 @@ static void make_req_data(http_svc_t* s, const char* url_path, const char* vhost
     const unsigned url_len = strlen(url_path);
     if(vhost) {
         s->req_data_len = 25 + url_len + strlen(vhost);
-        s->req_data = malloc(s->req_data_len + 1);
+        s->req_data = xmalloc(s->req_data_len + 1);
         snprintf(s->req_data, s->req_data_len + 1, "GET %s HTTP/1.0\r\nHost: %s\r\n\r\n", url_path, vhost);
     }
     else {
         s->req_data_len = 17 + url_len;
-        s->req_data = malloc(s->req_data_len + 1);
+        s->req_data = xmalloc(s->req_data_len + 1);
         snprintf(s->req_data, s->req_data_len + 1, "GET %s HTTP/1.0\r\n\r\n", url_path);
     }
 }
 
-void plugin_http_status_add_svctype(const char* name, const vscf_data_t* svc_cfg, const unsigned interval, const unsigned timeout) {
+void plugin_http_status_add_svctype(const char* name, vscf_data_t* svc_cfg, const unsigned interval, const unsigned timeout) {
     dmn_assert(name);
 
     // defaults
@@ -357,7 +370,7 @@ void plugin_http_status_add_svctype(const char* name, const vscf_data_t* svc_cfg
     const char* vhost = NULL;
     unsigned port = 80;
 
-    service_types = realloc(service_types, (num_http_svcs + 1) * sizeof(http_svc_t));
+    service_types = xrealloc(service_types, (num_http_svcs + 1) * sizeof(http_svc_t));
     http_svc_t* this_svc = &service_types[num_http_svcs++];
 
     this_svc->name = strdup(name);
@@ -365,29 +378,29 @@ void plugin_http_status_add_svctype(const char* name, const vscf_data_t* svc_cfg
     this_svc->ok_codes = NULL;
     bool ok_codes_set = false;
 
-    if(svc_cfg) {
-        SVC_OPT_STR(svc_cfg, name, url_path);
-        SVC_OPT_STR(svc_cfg, name, vhost);
-        SVC_OPT_UINT(svc_cfg, name, port, 1LU, 65534LU);
-        const vscf_data_t* ok_codes_cfg = vscf_hash_get_data_byconstkey(svc_cfg, "ok_codes", true);
-        if(ok_codes_cfg) {
-            ok_codes_set = true;
-            this_svc->num_ok_codes = vscf_array_get_len(ok_codes_cfg);
-            this_svc->ok_codes = malloc(sizeof(unsigned long) * this_svc->num_ok_codes);
-            for(unsigned i = 0; i < this_svc->num_ok_codes; i++) {
-                const vscf_data_t* code_cfg = vscf_array_get_data(ok_codes_cfg, i);
-                if(!vscf_simple_get_as_ulong(code_cfg, &this_svc->ok_codes[i]))
-                    log_fatal("plugin_http_status: service type '%s': illegal ok_codes value '%s', must be numeric http status code (100-999)", this_svc->name, vscf_simple_get_data(code_cfg));
-                if(this_svc->ok_codes[i] < 100LU || this_svc->ok_codes[i] > 999LU)
-                    log_fatal("plugin_http_status: service type '%s': illegal ok_codes value '%lu', must be numeric http status code (100-999)", this_svc->name, this_svc->ok_codes[i]);
-            }
+    SVC_OPT_STR(svc_cfg, name, url_path);
+    SVC_OPT_STR(svc_cfg, name, vhost);
+    SVC_OPT_UINT(svc_cfg, name, port, 1LU, 65534LU);
+    vscf_data_t* ok_codes_cfg = vscf_hash_get_data_byconstkey(svc_cfg, "ok_codes", true);
+    if(ok_codes_cfg) {
+        ok_codes_set = true;
+        this_svc->num_ok_codes = vscf_array_get_len(ok_codes_cfg);
+        this_svc->ok_codes = xmalloc(sizeof(unsigned) * this_svc->num_ok_codes);
+        for(unsigned i = 0; i < this_svc->num_ok_codes; i++) {
+            vscf_data_t* code_cfg = vscf_array_get_data(ok_codes_cfg, i);
+            unsigned long tmpcode;
+            if(!vscf_simple_get_as_ulong(code_cfg, &tmpcode))
+                log_fatal("plugin_http_status: service type '%s': illegal ok_codes value '%s', must be numeric http status code (100-999)", this_svc->name, vscf_simple_get_data(code_cfg));
+            if(tmpcode < 100LU || tmpcode > 999LU)
+                log_fatal("plugin_http_status: service type '%s': illegal ok_codes value '%lu', must be numeric http status code (100-999)", this_svc->name, tmpcode);
+            this_svc->ok_codes[i] = (unsigned)tmpcode;
         }
     }
 
-    // no config at all, but not the empty array...
+    // default the ok_codes array to [ 200 ]
     if(!ok_codes_set) {
         this_svc->num_ok_codes = 1;
-        this_svc->ok_codes = malloc(sizeof(unsigned long));
+        this_svc->ok_codes = xmalloc(sizeof(unsigned));
         this_svc->ok_codes[0] = 200LU;
     }
 
@@ -397,10 +410,12 @@ void plugin_http_status_add_svctype(const char* name, const vscf_data_t* svc_cfg
     this_svc->interval = interval;
 }
 
-void plugin_http_status_add_monitor(const char* svc_name, mon_smgr_t* smgr) {
-    dmn_assert(svc_name); dmn_assert(smgr);
+void plugin_http_status_add_mon_addr(const char* desc, const char* svc_name, const char* cname V_UNUSED, const dmn_anysin_t* addr, const unsigned idx) {
+    dmn_assert(desc); dmn_assert(svc_name); dmn_assert(cname); dmn_assert(addr);
 
-    http_events_t* this_mon = calloc(1, sizeof(http_events_t));
+    http_events_t* this_mon = xcalloc(1, sizeof(http_events_t));
+    this_mon->desc = strdup(desc);
+    this_mon->idx = idx;
 
     for(unsigned i = 0; i < num_http_svcs; i++) {
         if(!strcmp(service_types[i].name, svc_name)) {
@@ -411,7 +426,7 @@ void plugin_http_status_add_monitor(const char* svc_name, mon_smgr_t* smgr) {
 
     dmn_assert(this_mon->http_svc);
 
-    memcpy(&this_mon->addr, &smgr->addr, sizeof(anysin_t));
+    memcpy(&this_mon->addr, addr, sizeof(dmn_anysin_t));
     if(this_mon->addr.sa.sa_family == AF_INET) {
         this_mon->addr.sin.sin_port = htons(this_mon->http_svc->port);
     }
@@ -420,34 +435,33 @@ void plugin_http_status_add_monitor(const char* svc_name, mon_smgr_t* smgr) {
         this_mon->addr.sin6.sin6_port = htons(this_mon->http_svc->port);
     }
 
-    this_mon->smgr = smgr;
     this_mon->hstate = HTTP_STATE_WAITING;
     this_mon->sock = -1;
 
-    this_mon->read_watcher = malloc(sizeof(ev_io));
+    this_mon->read_watcher = xmalloc(sizeof(ev_io));
     ev_io_init(this_mon->read_watcher, &mon_read_cb, -1, 0);
     this_mon->read_watcher->data = this_mon;
 
-    this_mon->write_watcher = malloc(sizeof(ev_io));
+    this_mon->write_watcher = xmalloc(sizeof(ev_io));
     ev_io_init(this_mon->write_watcher, &mon_write_cb, -1, 0);
     this_mon->write_watcher->data = this_mon;
 
-    this_mon->timeout_watcher = malloc(sizeof(ev_timer));
+    this_mon->timeout_watcher = xmalloc(sizeof(ev_timer));
     ev_timer_init(this_mon->timeout_watcher, &mon_timeout_cb, 0, 0);
     this_mon->timeout_watcher->data = this_mon;
 
-    this_mon->interval_watcher = malloc(sizeof(ev_timer));
+    this_mon->interval_watcher = xmalloc(sizeof(ev_timer));
     ev_timer_init(this_mon->interval_watcher, &mon_interval_cb, 0, 0);
     this_mon->interval_watcher->data = this_mon;
 
-    mons = realloc(mons, sizeof(http_events_t*) * (num_mons + 1));
+    mons = xrealloc(mons, sizeof(http_events_t*) * (num_mons + 1));
     mons[num_mons++] = this_mon;
 }
 
 void plugin_http_status_init_monitors(struct ev_loop* mon_loop) {
     dmn_assert(mon_loop);
 
-    for(unsigned int i = 0; i < num_mons; i++) {
+    for(unsigned i = 0; i < num_mons; i++) {
         ev_timer* ival_watcher = mons[i]->interval_watcher;
         dmn_assert(mons[i]->sock == -1);
         ev_timer_set(ival_watcher, 0, 0);
@@ -458,7 +472,7 @@ void plugin_http_status_init_monitors(struct ev_loop* mon_loop) {
 void plugin_http_status_start_monitors(struct ev_loop* mon_loop) {
     dmn_assert(mon_loop);
 
-    for(unsigned int i = 0; i < num_mons; i++) {
+    for(unsigned i = 0; i < num_mons; i++) {
         http_events_t* mon = mons[i];
         dmn_assert(mon->sock == -1);
         const unsigned ival = mon->http_svc->interval;

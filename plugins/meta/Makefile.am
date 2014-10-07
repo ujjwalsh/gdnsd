@@ -1,4 +1,3 @@
-
 AM_CPPFLAGS = -I$(top_builddir)/gdnsd/libgdnsd -I$(top_srcdir)/gdnsd/libgdnsd -I$(srcdir)/libgdmaps
 AM_LIBTOOLFLAGS = --silent
 
@@ -16,6 +15,3 @@ EXTRA_DIST = meta_core.c
 
 check-download:
 	@$(MAKE) $(AM_MAKEFLAGS) -C libgdmaps check-download
-
-PODS_8 = gdnsd-plugin-metafo.pod gdnsd-plugin-geoip.pod
-include $(top_srcdir)/docs.am

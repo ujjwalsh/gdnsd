@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -39,6 +39,5 @@ int main(int argc, char* argv[]) {
     gdmaps_test_lookup_check(tnum++, gdmaps, "my_prod_map", "2002:453A:BA77::", "\1\2", 32); // 6to4
     gdmaps_test_lookup_check(tnum++, gdmaps, "my_prod_map", "2001::BAC5:4588", "\1\2", 112); // Teredo
     gdmaps_test_lookup_check(tnum++, gdmaps, "my_prod_map", "2600:3c00::f03c:91ff:fe96:6a4f", "\1\2", 30);
-    gdmaps_destroy(gdmaps);
 }
 

@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -58,7 +58,7 @@ static bool check_v4_issues(const uint8_t* ipv6, const unsigned mask) {
 // arguably, with at least some of the v4-like spaces we could simply translate and hope to de-dupe,
 //   if we upgraded nlist_normalize1 to de-dupe matching dclists instead of failing them
 F_NONNULL
-static bool nets_parse(const vscf_data_t* nets_cfg, dclists_t* dclists, const char* map_name, nlist_t* nl) {
+static bool nets_parse(vscf_data_t* nets_cfg, dclists_t* dclists, const char* map_name, nlist_t* nl) {
     dmn_assert(nets_cfg); dmn_assert(dclists); dmn_assert(map_name); dmn_assert(nl);
 
     bool rv = false;
@@ -79,7 +79,7 @@ static bool nets_parse(const vscf_data_t* nets_cfg, dclists_t* dclists, const ch
             break;
         }
         *mask_str++ = '\0';
-        anysin_t tempsin;
+        dmn_anysin_t tempsin;
         int addr_err = gdnsd_anysin_getaddrinfo(net_str, mask_str, &tempsin);
         if(addr_err) {
             log_err("plugin_geoip: map '%s': nets entry '%s/%s' does not parse as addr/mask: %s", map_name, net_str, mask_str, gai_strerror(addr_err));
@@ -118,7 +118,7 @@ static bool nets_parse(const vscf_data_t* nets_cfg, dclists_t* dclists, const ch
         }
 
         // get dclist integer from rhs
-        const vscf_data_t* dc_cfg = vscf_hash_get_data_byindex(nets_cfg, i);
+        vscf_data_t* dc_cfg = vscf_hash_get_data_byindex(nets_cfg, i);
         const unsigned dclist = dclists_find_or_add_vscf(dclists, dc_cfg, map_name, false);
         nlist_append(nl, ipv6, mask, dclist);
     }
@@ -126,7 +126,7 @@ static bool nets_parse(const vscf_data_t* nets_cfg, dclists_t* dclists, const ch
     return rv;
 }
 
-nlist_t* nets_make_list(const vscf_data_t* nets_cfg, dclists_t* dclists, const char* map_name) {
+nlist_t* nets_make_list(vscf_data_t* nets_cfg, dclists_t* dclists, const char* map_name) {
     dmn_assert(dclists); dmn_assert(map_name);
 
     nlist_t* nl = nlist_new(map_name, false);

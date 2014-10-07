@@ -42,15 +42,10 @@ static const char* which_str[2] = {
     "secondary"
 };
 
-static const char* which_str_mon[2] = {
-    "/pri/",
-    "/sec/"
-};
-
 typedef struct {
-    anysin_t addrs[2];
-    mon_state_t* states[2];
+    dmn_anysin_t addrs[2];
     unsigned num_svcs;
+    unsigned* indices[2];
 } addrstate_t;
 
 typedef struct {
@@ -62,56 +57,50 @@ typedef struct {
 static res_t* resources = NULL;
 static unsigned num_resources = 0;
 
-static mon_list_t mon_list = { 0, NULL };
-
-static const char DEFAULT_SVCNAME[] = "default";
+static const char DEFAULT_SVCNAME[] = "up";
 
 /*********************************/
 /* Local, static functions       */
 /*********************************/
 
-static void mon_add(const char* svctype, const char* resname, const char* addr_txt, mon_state_t* state_ptr) {
-    mon_list.info = realloc(mon_list.info, sizeof(mon_info_t) * (mon_list.count + 1));
-    mon_info_t* m = &mon_list.info[mon_list.count++];
-    m->svctype = svctype;
-    m->desc = resname;
-    m->addr = addr_txt;
-    m->state_ptr = state_ptr;
-}
-
-static bool bad_res_opt(const char* key, unsigned klen V_UNUSED, const vscf_data_t* d V_UNUSED, void* data) {
-    log_fatal("plugin_simplefo: resource '%s': bad option '%s'", (const char*)data, key);
+F_NONNULL
+static bool bad_res_opt(const char* key, unsigned klen V_UNUSED, vscf_data_t* d V_UNUSED, const void* resname_asvoid) {
+    dmn_assert(key); dmn_assert(d); dmn_assert(resname_asvoid);
+    const char* resname = resname_asvoid;
+    log_fatal("plugin_simplefo: resource '%s': bad option '%s'", resname, key);
 }
 
 F_NONNULL
-static as_af_t config_addrs(addrstate_t* as, as_af_t as_af, const char* resname, const char* stanza, const vscf_data_t* cfg) {
+static as_af_t config_addrs(addrstate_t* as, as_af_t as_af, const char* resname, const char* stanza, vscf_data_t* cfg) {
     dmn_assert(as); dmn_assert(resname); dmn_assert(stanza); dmn_assert(cfg); dmn_assert(vscf_is_hash(cfg));
 
-    unsigned num_svcs;
-    const char** svc_names;
-    const vscf_data_t* svctypes_data = vscf_hash_get_data_byconstkey(cfg, "service_types", true);
+    unsigned num_svcs = 0;
+    const char** svc_names = NULL;
+    vscf_data_t* svctypes_data = vscf_hash_get_data_byconstkey(cfg, "service_types", true);
     if(svctypes_data) {
-        as->num_svcs = num_svcs = vscf_array_get_len(svctypes_data);
-        if(!num_svcs)
-            log_fatal("plugin_simplefo: resource %s (%s): service_types cannot be empty", resname, stanza);
-        svc_names = malloc(sizeof(char*) * num_svcs);
-        for(unsigned i = 0; i < num_svcs; i++) {
-            const vscf_data_t* svctype_cfg = vscf_array_get_data(svctypes_data, i);
-            if(!vscf_is_simple(svctype_cfg))
-                log_fatal("plugin_simplefo: resource %s (%s): 'service_types' value(s) must be strings", resname, stanza);
-            svc_names[i] = vscf_simple_get_data(svctype_cfg);
+        num_svcs = vscf_array_get_len(svctypes_data);
+        if(num_svcs) {
+            svc_names = xmalloc(sizeof(char*) * num_svcs);
+            for(unsigned i = 0; i < num_svcs; i++) {
+                vscf_data_t* svctype_cfg = vscf_array_get_data(svctypes_data, i);
+                if(!vscf_is_simple(svctype_cfg))
+                    log_fatal("plugin_simplefo: resource %s (%s): 'service_types' value(s) must be strings", resname, stanza);
+                svc_names[i] = vscf_simple_get_data(svctype_cfg);
+            }
         }
     }
     else {
-        as->num_svcs = num_svcs = 1;
-        svc_names = malloc(sizeof(char*));
+        num_svcs = 1;
+        svc_names = xmalloc(sizeof(char*));
         svc_names[0] = DEFAULT_SVCNAME;
     }
+
+    as->num_svcs = num_svcs;
 
     res_which_t both[2] = { A_PRI, A_SEC };
     for(unsigned i = 0; i < 2; i++) {
         res_which_t which = both[i];
-        const vscf_data_t* addrcfg = vscf_hash_get_data_bystringkey(cfg, which_str[which], true);
+        vscf_data_t* addrcfg = vscf_hash_get_data_bystringkey(cfg, which_str[which], true);
         if(!addrcfg || VSCF_SIMPLE_T != vscf_get_type(addrcfg))
             log_fatal("plugin_simplefo: resource %s (%s): '%s' must be defined as an IP address string", resname, stanza, which_str[which]);
         const char* addr_txt = vscf_simple_get_data(addrcfg);
@@ -125,14 +114,10 @@ static as_af_t config_addrs(addrstate_t* as, as_af_t as_af, const char* resname,
         else if(as_af == A_IPv4 && ipv6)
             log_fatal("plugin_simplefo: resource %s (%s): '%s' is not an IPv4 address", resname, stanza, addr_txt);
 
-        as->states[which] = malloc(sizeof(mon_state_t) * num_svcs);
-        for(unsigned j = 0; j < num_svcs; j++) {
-            char* desc = malloc(strlen(resname) + 5 + strlen(which_str_mon[which]) + strlen(svc_names[j]) + 1);
-            strcpy(desc, resname);
-            strcat(desc, ipv6 ? "/ipv6" : "/ipv4");
-            strcat(desc, which_str_mon[which]);
-            strcat(desc, svc_names[j]);
-            mon_add(svc_names[j], desc, addr_txt, &as->states[which][j]);
+        if(num_svcs) {
+            as->indices[which] = xmalloc(sizeof(unsigned) * num_svcs);
+            for(unsigned j = 0; j < num_svcs; j++)
+                as->indices[which][j] = gdnsd_mon_addr(svc_names[j], &as->addrs[which]);
         }
     }
 
@@ -144,12 +129,12 @@ static as_af_t config_addrs(addrstate_t* as, as_af_t as_af, const char* resname,
         return as->addrs[A_PRI].sa.sa_family == AF_INET6 ? A_IPv6 : A_IPv4;
     }
 
-    vscf_hash_iterate(cfg, true, bad_res_opt, (void*)resname);
+    vscf_hash_iterate_const(cfg, true, bad_res_opt, resname);
 
     return as_af;
 }
 
-static bool config_res(const char* resname, unsigned resname_len V_UNUSED, const vscf_data_t* opts, void* data) {
+static bool config_res(const char* resname, unsigned resname_len V_UNUSED, vscf_data_t* opts, void* data) {
     unsigned* residx_ptr = data;
     unsigned rnum = (*residx_ptr)++;
     res_t* res = &resources[rnum];
@@ -160,10 +145,10 @@ static bool config_res(const char* resname, unsigned resname_len V_UNUSED, const
 
     vscf_hash_bequeath_all(opts, "service_types", true, false);
 
-    const vscf_data_t* addrs_v4_cfg = vscf_hash_get_data_byconstkey(opts, "addrs_v4", true);
-    const vscf_data_t* addrs_v6_cfg = vscf_hash_get_data_byconstkey(opts, "addrs_v6", true);
+    vscf_data_t* addrs_v4_cfg = vscf_hash_get_data_byconstkey(opts, "addrs_v4", true);
+    vscf_data_t* addrs_v6_cfg = vscf_hash_get_data_byconstkey(opts, "addrs_v6", true);
     if(!addrs_v4_cfg && !addrs_v6_cfg) {
-        addrstate_t* as = malloc(sizeof(addrstate_t));
+        addrstate_t* as = xmalloc(sizeof(addrstate_t));
         as_af_t which = config_addrs(as, A_AUTO, resname, "direct", opts);
         if(which == A_IPv4) {
             res->addrs_v4 = as;
@@ -177,19 +162,19 @@ static bool config_res(const char* resname, unsigned resname_len V_UNUSED, const
         if(addrs_v4_cfg) {
             if(!vscf_is_hash(addrs_v4_cfg))
                 log_fatal("plugin_simplefo: resource %s: The value of 'addrs_v4', if defined, must be a hash", resname);
-            addrstate_t* as = res->addrs_v4 = malloc(sizeof(addrstate_t));
+            addrstate_t* as = res->addrs_v4 = xmalloc(sizeof(addrstate_t));
             config_addrs(as, A_IPv4, resname, "addrs_v4", addrs_v4_cfg);
         }
         if(addrs_v6_cfg) {
             if(!vscf_is_hash(addrs_v6_cfg))
                 log_fatal("plugin_simplefo: resource %s: The value of 'addrs_v6', if defined, must be a hash", resname);
-            addrstate_t* as = res->addrs_v6 = malloc(sizeof(addrstate_t));
+            addrstate_t* as = res->addrs_v6 = xmalloc(sizeof(addrstate_t));
             config_addrs(as, A_IPv6, resname, "addrs_v6", addrs_v6_cfg);
         }
     }
 
 
-    vscf_hash_iterate(opts, true, bad_res_opt, (void*)resname);
+    vscf_hash_iterate_const(opts, true, bad_res_opt, resname);
     return true;
 }
 
@@ -197,7 +182,7 @@ static bool config_res(const char* resname, unsigned resname_len V_UNUSED, const
 /* Exported callbacks start here */
 /*********************************/
 
-mon_list_t* plugin_simplefo_load_config(const vscf_data_t* config) {
+void plugin_simplefo_load_config(vscf_data_t* config, const unsigned num_threads V_UNUSED) {
     if(!config)
         log_fatal("simplefo plugin requires a 'plugins' configuration stanza");
 
@@ -209,14 +194,13 @@ mon_list_t* plugin_simplefo_load_config(const vscf_data_t* config) {
     if(vscf_hash_bequeath_all(config, "service_types", true, false))
         num_resources--; // don't count parameter keys
 
-    resources = calloc(num_resources, sizeof(res_t));
+    resources = xcalloc(num_resources, sizeof(res_t));
     unsigned residx = 0;
     vscf_hash_iterate(config, true, config_res, &residx);
-
-    return &mon_list;
+    gdnsd_dyn_addr_max(1, 1); // simplefo only returns one address per family
 }
 
-int plugin_simplefo_map_resource_dyna(const char* resname) {
+int plugin_simplefo_map_res(const char* resname, const uint8_t* origin V_UNUSED) {
     if(resname) {
         for(unsigned i = 0; i < num_resources; i++)
             if(!strcmp(resname, resources[i].name))
@@ -231,56 +215,66 @@ int plugin_simplefo_map_resource_dyna(const char* resname) {
 }
 
 // ---state chart-------------
-// p    s    ttl    which fail_upstream?
-// up   *    normal pri   no
-// dang *    halved pri   no
-// down up   halved sec   no
-// down dang halved sec   no
-// down down halved pri   yes
+// p    s    ttl      which fail_upstream?
+// up   *    p        pri   no
+// down up   min(p,s) sec   no
+// down down s        pri   yes
 // ----------------------------
 F_NONNULL
-static bool resolve_addr(const addrstate_t* as, dynaddr_result_t* result, bool* cut_ttl_ptr) {
-    dmn_assert(as); dmn_assert(result); dmn_assert(cut_ttl_ptr);
+static gdnsd_sttl_t resolve_addr(const gdnsd_sttl_t* sttl_tbl, const addrstate_t* as, dyn_result_t* result) {
+    dmn_assert(as); dmn_assert(result);
 
-    bool rv = true;
+    const gdnsd_sttl_t p_sttl = gdnsd_sttl_min(sttl_tbl, as->indices[A_PRI], as->num_svcs);
+
     res_which_t which = A_PRI;
-    mon_state_uint_t p_state = gdnsd_mon_get_min_state(as->states[A_PRI], as->num_svcs);
-    switch(p_state) {
-        case MON_STATE_DOWN:
-            if(gdnsd_mon_get_min_state(as->states[A_SEC], as->num_svcs) != MON_STATE_DOWN)
-                which = A_SEC;
-            else
-                rv = false;
-            // fall-through
-        case MON_STATE_DANGER:;
-            *cut_ttl_ptr = true;
-            break;
-        default:
-            dmn_assert(p_state == MON_STATE_UP);
+
+    gdnsd_sttl_t sttl_out;
+    if(p_sttl & GDNSD_STTL_DOWN) {
+        const gdnsd_sttl_t s_sttl = gdnsd_sttl_min(sttl_tbl, as->indices[A_SEC], as->num_svcs);
+        if(s_sttl & GDNSD_STTL_DOWN) {
+            // both are down...
+            sttl_out = s_sttl;
+        }
+        else {
+            // p is down, s is up...
+            which = A_SEC;
+            const unsigned p_ttl = p_sttl & GDNSD_STTL_TTL_MASK;
+            sttl_out = s_sttl & GDNSD_STTL_TTL_MASK;
+            if(p_ttl < sttl_out)
+                sttl_out = p_ttl;
+        }
+    }
+    else {
+        // p is up, s is dontcare
+        sttl_out = p_sttl;
     }
 
-    gdnsd_dynaddr_add_result_anysin(result, &as->addrs[which]);
-    return rv;
+    gdnsd_result_add_anysin(result, &as->addrs[which]);
+    assert_valid_sttl(sttl_out);
+    return sttl_out;
 }
 
-bool plugin_simplefo_resolve_dynaddr(unsigned threadnum V_UNUSED, unsigned resnum, const client_info_t* cinfo V_UNUSED, dynaddr_result_t* result) {
-    bool rv = true;
-    bool cut_ttl = false;
+gdnsd_sttl_t plugin_simplefo_resolve(unsigned resnum, const uint8_t* origin V_UNUSED, const client_info_t* cinfo V_UNUSED, dyn_result_t* result) {
+    dmn_assert(result);
+
     res_t* res = &resources[resnum];
 
+    const gdnsd_sttl_t* sttl_tbl = gdnsd_mon_get_sttl_table();
+
+    gdnsd_sttl_t rv;
+
     if(res->addrs_v4) {
-        rv &= resolve_addr(res->addrs_v4, result, &cut_ttl);
-        dmn_assert(result->count_v4);
+        rv = resolve_addr(sttl_tbl, res->addrs_v4, result);
+        if(res->addrs_v6) {
+            const gdnsd_sttl_t v6_rv = resolve_addr(sttl_tbl, res->addrs_v6, result);
+            rv = gdnsd_sttl_min2(rv, v6_rv);
+        }
+    }
+    else {
+        dmn_assert(res->addrs_v6);
+        rv = resolve_addr(sttl_tbl, res->addrs_v6, result);
     }
 
-    if(res->addrs_v6) {
-        rv &= resolve_addr(res->addrs_v6, result, &cut_ttl);
-        dmn_assert(result->count_v6);
-    }
-
-    if(cut_ttl)
-        result->ttl >>= 1;
-
+    assert_valid_sttl(rv);
     return rv;
 }
-

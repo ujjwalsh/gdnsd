@@ -1,11 +1,6 @@
 
 options => {
-  listen => @dns_lspec@
-  http_listen => @http_lspec@
-  dns_port => @dns_port@
-  http_port => @http_port@
-  plugin_search_path = @pluginpath@
-  realtime_stats = true
+  @std_testsuite_options@
 }
 
 service_types => {
@@ -14,18 +9,27 @@ service_types => {
         cmd => [ "/bin/sh", "-c", "exit 1" ],
         timeout = 1
         interval = 2
+        up_thresh = 20
+        down_thresh = 10
+        ok_thresh = 10
     }
     ext_up => {
         plugin => extmon
         cmd => [ "/bin/sh", "-c", "exit 0" ],
         timeout = 1
         interval = 2
+        up_thresh = 20
+        down_thresh = 10
+        ok_thresh = 10
     }
     ext_timeout => {
         plugin => extmon
         cmd => [ "/bin/sh", "-c", "sleep 2" ],
         timeout = 1
         interval = 2
+        up_thresh = 20
+        down_thresh = 10
+        ok_thresh = 10
     }
 }
 

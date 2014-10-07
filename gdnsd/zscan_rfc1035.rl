@@ -20,16 +20,19 @@
 #include "zscan_rfc1035.h"
 
 #include <string.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <setjmp.h>
+#include <errno.h>
 
 #include "conf.h"
 #include "ltree.h"
 #include "ltarena.h"
-#include "gdnsd/log.h"
-#include "gdnsd/misc.h"
+#include <gdnsd/alloc.h>
+#include <gdnsd/log.h>
+#include <gdnsd/misc.h>
 
 #ifndef INET6_ADDRSTRLEN
 #define INET6_ADDRSTRLEN 46
@@ -42,15 +45,14 @@
  *  to accommodate that.  There probably wouldn't be any bugs
  *  going down to something reasonable like 4K, but it would
  *  cause parse errors if anyone tried to use longer TXT strings.
- * Another important thing: for integers, we use atoi() directly
+ * Another important thing: for integers, we use strtoul() directly
  *  on the buffer itself.  In the normal case this works because
  *  there is always some non-integer after it in the buffer, which
- *  halts atoi().  The corner case is if the last digit of an
+ *  halts strtoul().  The corner case is if the last digit of an
  *  integer happened to be the last byte of the buffer.  This
  *  is why we allocate one extra buffer byte and set it to zero.
  */
 #define MAX_BUFSIZE 65536
-
 
 #define parse_error(_fmt, ...) \
     do {\
@@ -75,6 +77,7 @@ typedef struct {
     unsigned def_ttl;
     unsigned uval;
     unsigned ttl;
+    unsigned ttl_min;
     unsigned uv_1;
     unsigned uv_2;
     unsigned uv_3;
@@ -90,7 +93,10 @@ typedef struct {
     uint8_t  origin[256];
     uint8_t  lhs_dname[256];
     uint8_t  rhs_dname[256];
-    uint8_t  eml_dname[256];
+    union {
+        uint8_t eml_dname[256];
+        char    rhs_dyn[256];
+    };
     uint8_t** texts;
     sigjmp_buf jbuf;
 } zscan_t;
@@ -134,13 +140,22 @@ static void set_ipv6(zscan_t* z, const char* end) {
 }
 
 F_NONNULL
+static void set_uval(zscan_t* z) {
+    errno = 0;
+    z->uval = strtoul(z->tstart, NULL, 10);
+    z->tstart = NULL;
+    if(errno)
+        parse_error("Integer conversion error: %s", dmn_logf_errno());
+}
+
+F_NONNULL
 static void validate_origin_in_zone(zscan_t* z, const uint8_t* origin) {
     dmn_assert(z); dmn_assert(z->zone->dname); dmn_assert(origin);
     if(!dname_isinzone(z->zone->dname, origin))
         parse_error("Origin '%s' is not within this zonefile's zone (%s)", logf_dname(origin), logf_dname(z->zone->dname));
 }
 
-F_NONNULL F_PURE
+F_NONNULL
 static void validate_lhs_not_ooz(zscan_t* z) {
     dmn_assert(z);
     if(z->lhs_is_ooz)
@@ -154,7 +169,7 @@ static void dname_set(zscan_t* z, uint8_t* dname, unsigned len, bool lhs) {
     dname_status_t status;
 
     if(len) {
-        status = dname_from_string(dname, (const uint8_t*)z->tstart, len);
+        status = dname_from_string(dname, z->tstart, len);
     }
     else {
         dmn_assert(lhs);
@@ -191,7 +206,7 @@ static void dname_set(zscan_t* z, uint8_t* dname, unsigned len, bool lhs) {
     }
 }
 
-/********** TXT/SPF ******************/
+/********** TXT ******************/
 
 F_NONNULL
 static void text_start(zscan_t* z) {
@@ -204,11 +219,11 @@ F_NONNULL
 static void text_add_tok(zscan_t* z, const unsigned len, const bool big_ok) {
     dmn_assert(z);
 
-    uint8_t text_temp[len + 1];
+    char text_temp[len + 1];
     text_temp[0] = 0;
     unsigned newlen = len;
     if(len)
-        newlen = dns_unescape(text_temp, (const uint8_t*)z->tstart, len);
+        newlen = dns_unescape(text_temp, z->tstart, len);
 
     dmn_assert(newlen <= len);
 
@@ -218,25 +233,25 @@ static void text_add_tok(zscan_t* z, const unsigned len, const bool big_ok) {
         if(newlen > 65500) parse_error_noargs("Text chunk too long (>65500 unescaped)");
         unsigned remainder = newlen % 255;
         unsigned num_whole_chunks = (newlen - remainder) / 255;
-        const uint8_t* zptr = text_temp;
+        const char* zptr = text_temp;
         const unsigned new_alloc = 1 + z->num_texts + num_whole_chunks + (remainder ? 1 : 0);
-        z->texts = realloc(z->texts, new_alloc * sizeof(uint8_t*));
+        z->texts = xrealloc(z->texts, new_alloc * sizeof(uint8_t*));
         for(unsigned i = 0; i < num_whole_chunks; i++) {
-            uint8_t* chunk = z->texts[z->num_texts++] = malloc(256);
+            uint8_t* chunk = z->texts[z->num_texts++] = xmalloc(256);
             *chunk++ = 255;
             memcpy(chunk, zptr, 255);
             zptr += 255;
         }
         if(remainder) {
-            uint8_t* chunk = z->texts[z->num_texts++] = malloc(remainder + 1);
+            uint8_t* chunk = z->texts[z->num_texts++] = xmalloc(remainder + 1);
             *chunk++ = remainder;
             memcpy(chunk, zptr, remainder);
         }
         z->texts[z->num_texts] = NULL;
     }
     else {
-        z->texts = realloc(z->texts, (z->num_texts + 2) * sizeof(uint8_t*));
-        uint8_t* chunk = z->texts[z->num_texts++] = malloc(newlen + 1);
+        z->texts = xrealloc(z->texts, (z->num_texts + 2) * sizeof(uint8_t*));
+        uint8_t* chunk = z->texts[z->num_texts++] = xmalloc(newlen + 1);
         *chunk++ = newlen;
         memcpy(chunk, text_temp, newlen);
         z->texts[z->num_texts] = NULL;
@@ -293,8 +308,8 @@ static void set_dyna(zscan_t* z, const char* fpc) {
     unsigned dlen = fpc - z->tstart;
     if(dlen > 255)
         parse_error_noargs("DYNA/DYNC plugin!resource string cannot exceed 255 chars");
-    memcpy(z->eml_dname, z->tstart, dlen);
-    z->eml_dname[dlen] = 0;
+    memcpy(z->rhs_dyn, z->tstart, dlen);
+    z->rhs_dyn[dlen] = 0;
     z->tstart = NULL;
 }
 
@@ -389,35 +404,17 @@ static void rec_txt(zscan_t* z) {
 }
 
 F_NONNULL
-static void rec_spf(zscan_t* z) {
-    dmn_assert(z);
-    validate_lhs_not_ooz(z);
-    if(ltree_add_rec_spf(z->zone, z->lhs_dname, z->num_texts, z->texts, z->ttl))
-        siglongjmp(z->jbuf, 1);
-    texts_cleanup(z);
-}
-
-F_NONNULL
-static void rec_spftxt(zscan_t* z) {
-    dmn_assert(z);
-    validate_lhs_not_ooz(z);
-    if(ltree_add_rec_spftxt(z->zone, z->lhs_dname, z->num_texts, z->texts, z->ttl))
-        siglongjmp(z->jbuf, 1);
-    texts_cleanup(z);
-}
-
-F_NONNULL
 static void rec_dyna(zscan_t* z) {
     dmn_assert(z);
-    if(ltree_add_rec_dynaddr(z->zone, z->lhs_dname, z->eml_dname, z->ttl, z->limit_v4, z->limit_v6, z->lhs_is_ooz))
+    if(ltree_add_rec_dynaddr(z->zone, z->lhs_dname, z->rhs_dyn, z->ttl, z->ttl_min, z->limit_v4, z->limit_v6, z->lhs_is_ooz))
         siglongjmp(z->jbuf, 1);
 }
 
 F_NONNULL
-static void rec_dyncname(zscan_t* z) {
+static void rec_dync(zscan_t* z) {
     dmn_assert(z);
     validate_lhs_not_ooz(z);
-    if(ltree_add_rec_dyncname(z->zone, z->lhs_dname, z->eml_dname, z->origin, z->ttl))
+    if(ltree_add_rec_dync(z->zone, z->lhs_dname, z->rhs_dyn, z->origin, z->ttl, z->ttl_min, z->limit_v4, z->limit_v6))
         siglongjmp(z->jbuf, 1);
 }
 
@@ -437,7 +434,7 @@ static void rfc3597_data_setup(zscan_t* z) {
     dmn_assert(z);
     z->rfc3597_data_len = z->uval;
     z->rfc3597_data_written = 0;
-    z->rfc3597_data = malloc(z->uval);
+    z->rfc3597_data = xmalloc(z->uval);
 }
 
 F_NONNULL
@@ -508,12 +505,14 @@ static void close_paren(zscan_t* z) {
 
     action set_ipv4 { set_ipv4(z, fpc); }
     action set_ipv6 { set_ipv6(z, fpc); }
-    action set_uval { z->uval = atoi(z->tstart); z->tstart = NULL; }
+    action set_uval { set_uval(z); }
     action mult_uval { mult_uval(z, fc); }
 
     action set_ttl     { z->ttl  = z->uval; }
+    action set_ttl_dyn { z->ttl  = z->uv_1; z->ttl_min = z->uv_2 ? z->uv_2 : z->uv_1 >> 1; }
     action set_def_ttl { z->def_ttl = z->uval; }
     action use_def_ttl { z->ttl  = z->def_ttl; }
+    action use_def_ttl_dyn { z->ttl  = z->def_ttl; z->ttl_min = z->def_ttl >> 1; z->uv_2 = 0; }
     action set_uv_1    { z->uv_1 = z->uval; }
     action set_uv_2    { z->uv_2 = z->uval; }
     action set_uv_3    { z->uv_3 = z->uval; }
@@ -523,7 +522,6 @@ static void close_paren(zscan_t* z) {
     action set_limit_v4 { set_limit_v4(z); }
     action set_limit_v6 { set_limit_v6(z); }
 
-    # We re-use eml_dname to store dyna strings
     action set_dyna { set_dyna(z, fpc); }
 
     action rec_soa { rec_soa(z); }
@@ -536,10 +534,8 @@ static void close_paren(zscan_t* z) {
     action rec_srv { rec_srv(z); }
     action rec_naptr { rec_naptr(z); }
     action rec_txt { rec_txt(z); }
-    action rec_spf { rec_spf(z); }
-    action rec_spftxt { rec_spftxt(z); }
     action rec_dyna { rec_dyna(z); }
-    action rec_dync { rec_dyncname(z); }
+    action rec_dync { rec_dync(z); }
     action rec_rfc3597 { rec_rfc3597(z); }
 
     action rfc3597_data_setup { rfc3597_data_setup(z); }
@@ -618,6 +614,7 @@ static void close_paren(zscan_t* z) {
     uval      = digit+ >token_start %set_uval;
     uval_mult = [MHDWmhdw] @mult_uval;
     ttl       = (uval uval_mult?);
+    ttl_dyn   = (uval uval_mult? %set_uv_1) ('/' uval uval_mult? %set_uv_2)?;
 
     # IPv[46] Addresses.  Note that while they are not very
     #  very precise, anything bad that gets past them will still
@@ -646,6 +643,12 @@ static void close_paren(zscan_t* z) {
         | ('IN'i ws (ttl %set_ttl ws)?)
     )?;
 
+    # Separate version for DYN[AC] to support TTLs of the form max[/min]
+    rr_lhs_dyn = dname_lhs? ws %use_def_ttl_dyn (
+          (ttl_dyn %set_ttl_dyn ws ('IN'i ws)?)
+        | ('IN'i ws (ttl_dyn %set_ttl_dyn ws)?)
+    )?;
+
     # The rest of a resource record: RR-type and RR-type-specific RDATA.
     # The final actions of each match here invoke ltree code to insert
     #  data into the runtime data structures.
@@ -657,21 +660,23 @@ static void close_paren(zscan_t* z) {
         | ('PTR'i   ws dname_rhs) %rec_ptr
         | ('MX'i    ws uval %set_uv_1 ws dname_rhs) %rec_mx
         | ('TXT'i   ws txt_rdata) %rec_txt
-        | ('SPF'i   ws txt_rdata) %rec_spf
-        | ('SPF+'i  ws txt_rdata) %rec_spftxt
         | ('SRV'i   ws uval %set_uv_1 ws uval %set_uv_2
                     ws uval %set_uv_3 ws dname_rhs) %rec_srv
         | ('NAPTR'i ws naptr_rdata) %rec_naptr
-        | ('DYNA'i  ws dyna_rdata) %rec_dyna
-        | ('DYNC'i  ws dyna_rdata) %rec_dync
         | ('SOA'i   ws dname_rhs ws dname_eml ws ttl %set_uv_1
                     ws ttl %set_uv_2 ws ttl %set_uv_3 ws ttl %set_uv_4
                     ws ttl %set_uv_5) %rec_soa
         | ('TYPE'i  rfc3597_rdata) %rec_rfc3597
     );
 
-    # A complete resource record
-    rr = rr_lhs rr_rhs;
+    # Again, separate copy for the DYN[AC] TTL stuff
+    rr_rhs_dyn = (
+          ('DYNA'i  ws dyna_rdata) %rec_dyna
+        | ('DYNC'i  ws dyna_rdata) %rec_dync
+    );
+
+    # A complete resource record, static or dynamic
+    rr = (rr_lhs rr_rhs) | (rr_lhs_dyn rr_rhs_dyn);
 
     # A "command", the $foo directives in zonefiles
     cmd = '$' (
@@ -692,6 +697,8 @@ static void close_paren(zscan_t* z) {
 F_NONNULL
 static void scanner(zscan_t* z, char* buf, const unsigned bufsize, const int fd) {
     dmn_assert(z);
+
+    (void)zone_en_main; // silence unused var warning from generated code
 
     char* read_at;
 
@@ -715,7 +722,7 @@ static void scanner(zscan_t* z, char* buf, const unsigned bufsize, const int fd)
 
         const int len = read(fd, read_at, space);
         if(len < 0)
-            parse_error("read() failed: %s", logf_errno());
+            parse_error("read() failed: %s", dmn_logf_errno());
 
         pe = p + len;
 
@@ -768,7 +775,7 @@ bool zscan_rfc1035(zone_t* zone, const char* fn) {
 
     const int fd = open(fn, O_RDONLY);
     if(fd < 0) {
-        log_err("rfc1035: Cannot open file '%s' for reading: %s", logf_pathname(fn), logf_errno());
+        log_err("rfc1035: Cannot open file '%s' for reading: %s", fn, dmn_logf_errno());
         return true;
     }
 
@@ -783,25 +790,25 @@ bool zscan_rfc1035(zone_t* zone, const char* fn) {
                 bufsize = fdstat.st_size;
         }
         else {
-            log_warn("rfc1035: fstat(%s) failed for advice, not critical...", logf_pathname(fn));
+            log_warn("rfc1035: fstat(%s) failed for advice, not critical...", fn);
         }
     }
 
-    zscan_t* z = calloc(1, sizeof(zscan_t));
+    zscan_t* z = xcalloc(1, sizeof(zscan_t));
     z->lcount = 1;
     z->def_ttl = gconfig.zones_default_ttl;
     z->zone = zone;
     dname_copy(z->origin, zone->dname);
     z->lhs_dname[0] = 1; // set lhs to relative origin initially
 
-    char* buf = malloc(bufsize + 1);
+    char* buf = xmalloc(bufsize + 1);
     buf[bufsize] = 0;
 
     sij_func_t sij = &_scan_isolate_jmp;
     bool failed = sij(z, buf, bufsize, fd);
 
     if(close(fd)) {
-        log_err("rfc1035: Cannot close file '%s': %s", logf_pathname(fn), logf_errno());
+        log_err("rfc1035: Cannot close file '%s': %s", fn, dmn_logf_errno());
         failed = true;
     }
 

@@ -18,8 +18,9 @@
  */
 
 #include "config.h"
-#include "gdnsd/compiler.h"
-#include "gdnsd/log.h"
+#include <gdnsd/alloc.h>
+#include <gdnsd/compiler.h>
+#include <gdnsd/log.h>
 
 #include "extmon_comms.h"
 
@@ -47,7 +48,7 @@ static unsigned num_mons = 0;
 static mon_t* mons = NULL;
 
 F_NONNULL
-static void syserr_for_ev(const char* msg) { dmn_assert(msg); log_fatal("%s: %s", msg, logf_errno()); }
+static void syserr_for_ev(const char* msg) { dmn_assert(msg); log_fatal("%s: %s", msg, dmn_logf_errno()); }
 
 static int plugin_read_fd = -1;
 static int plugin_write_fd = -1;
@@ -68,7 +69,7 @@ unsigned sendq_head = 0;
 // must be power of 2!
 #define SENDQ_INITSIZE 16
 static void sendq_init(void) {
-    sendq = malloc(SENDQ_INITSIZE * sizeof(uint32_t));
+    sendq = xmalloc(SENDQ_INITSIZE * sizeof(uint32_t));
     sendq_alloc = SENDQ_INITSIZE;
 }
 
@@ -82,7 +83,7 @@ static void sendq_enq(uint32_t new_data) {
         // buffer too small, upsize first (we never downsize)
         const unsigned old_mask = sendq_alloc - 1;
         sendq_alloc <<= 1;
-        uint32_t* newq = malloc(sendq_alloc * sizeof(uint32_t));
+        uint32_t* newq = xmalloc(sendq_alloc * sizeof(uint32_t));
         for(unsigned i = 0; i < sendq_len; i++)
             newq[i] = sendq[(sendq_head + i) & old_mask];
         newq[sendq_len] = new_data;
@@ -175,14 +176,14 @@ static void mon_interval_cb(struct ev_loop* loop, ev_timer* w, int revents V_UNU
 
     this_mon->cmd_pid = fork();
     if(this_mon->cmd_pid == -1)
-        log_fatal("fork() failed: %s", dmn_strerror(errno));
+        log_fatal("fork() failed: %s", dmn_logf_strerror(errno));
 
     if(!this_mon->cmd_pid) { // child
         // technically, we could go ahead and close off stdout/stderr
         //   here for the "startfg" case, but why bother?  If the user
         //   is debugging via startfg they might want to see this crap anyways.
         execv(this_mon->cmd->args[0], (char* const *)this_mon->cmd->args);
-        log_fatal("execv(%s, ...) failed: %s", this_mon->cmd->args[0], dmn_strerror(errno));
+        log_fatal("execv(%s, ...) failed: %s", this_mon->cmd->args[0], dmn_logf_strerror(errno));
     }
 
     this_mon->result_pending = true;
@@ -200,7 +201,7 @@ static void plugin_write_cb(struct ev_loop* loop, ev_io* w, int revents V_UNUSED
         int rv = write(plugin_write_fd, &data, 4);
         if(rv != 4) {
             if(rv < 0) {
-                if(errno == EAGAIN)
+                if(errno == EAGAIN || errno == EWOULDBLOCK)
                     return; // pipe full, wait for more libev notification of write-ready
                 else if(errno == EINTR)
                     continue; // try this write again immediately
@@ -223,15 +224,6 @@ static void plugin_write_cb(struct ev_loop* loop, ev_io* w, int revents V_UNUSED
 }
 
 int main(int argc, char** argv) {
-    dmn_init_log("gdnsd_extmon_helper", true);
-
-    // start up syslog IFF it appears the daemon
-    //   was *not* started via "startfg".  Regular
-    //   start/restart would have /dev/null'd the
-    //   standard descriptors before forking us off.
-    if(!isatty(0))
-        dmn_start_syslog();
-
     // Bail out early if we don't have the right argument
     //   count, and try to tell the user not to run us
     //   if stderr happens to be hooked up to a terminal
@@ -240,21 +232,21 @@ int main(int argc, char** argv) {
         exit(99);
     }
 
-    // open stderr logging connection using passed fd
-    dmn_log_set_alt_stderr(atoi(argv[2]));
+    bool debug = false;
+    if(!strcmp(argv[1], "Y"))
+        debug = true;
+
+    bool startfg = false;
+    if(!strcmp(argv[2], "F"))
+        startfg = true;
+
+    dmn_init1(debug, true, startfg, !startfg, "gdnsd_extmon_helper");
 
     // regardless, we seal off stdin now.  We don't need it,
     //   and this way we don't have to deal with it when
     //   execv()-ing child commands later.
     if(!freopen("/dev/null", "r", stdin))
-        dmn_log_fatal("Cannot open /dev/null: %s", dmn_strerror(errno));
-
-    if(!strcmp(argv[1], "Y"))
-        dmn_set_debug(true);
-    else if(!strcmp(argv[1], "N"))
-        dmn_set_debug(false);
-    else
-        log_fatal("Invalid debug argument on cmdline: '%s'!", argv[1]);
+        dmn_log_fatal("Cannot open /dev/null: %s", dmn_logf_strerror(errno));
 
     // these are the main communication pipes to the daemon/plugin
     plugin_read_fd = atoi(argv[3]);
@@ -267,9 +259,9 @@ int main(int argc, char** argv) {
     // CLOEXEC the direct lines to the main plugin/daemon,
     //   so that child scripts can't screw with them.
     if(fcntl(plugin_read_fd, F_SETFD, FD_CLOEXEC))
-        log_fatal("Failed to set FD_CLOEXEC on plugin read fd: %s", dmn_strerror(errno));
+        log_fatal("Failed to set FD_CLOEXEC on plugin read fd: %s", dmn_logf_strerror(errno));
     if(fcntl(plugin_write_fd, F_SETFD, FD_CLOEXEC))
-        log_fatal("Failed to set FD_CLOEXEC on plugin write fd: %s", dmn_strerror(errno));
+        log_fatal("Failed to set FD_CLOEXEC on plugin write fd: %s", dmn_logf_strerror(errno));
 
     if(emc_read_exact(plugin_read_fd, "HELO"))
         log_fatal("Failed to read HELO from plugin");
@@ -283,7 +275,7 @@ int main(int argc, char** argv) {
     num_mons = ((unsigned)ccount_buf[5] << 8) + ccount_buf[6];
     if(!num_mons)
         log_fatal("Received command count of zero from plugin");
-    mons = calloc(num_mons, sizeof(mon_t));
+    mons = xcalloc(num_mons, sizeof(mon_t));
 
     if(emc_write_string(plugin_write_fd, "CMDS_ACK", 8))
         log_fatal("Failed to write CMDS_ACK to plugin");
@@ -310,7 +302,7 @@ int main(int argc, char** argv) {
     // done with the serial setup, close the readpipe and go nonblocking on write for eventloop...
     close(plugin_read_fd);
     if(unlikely(fcntl(plugin_write_fd, F_SETFL, (fcntl(plugin_write_fd, F_GETFL, 0)) | O_NONBLOCK) == -1))
-        log_fatal("Failed to set O_NONBLOCK on pipe: %s", logf_errno());
+        log_fatal("Failed to set O_NONBLOCK on pipe: %s", dmn_logf_errno());
 
     // init results-sending queue
     sendq_init();
@@ -321,12 +313,10 @@ int main(int argc, char** argv) {
     // Construct the default loop for the main thread
     struct ev_loop* def_loop = ev_default_loop(EVFLAG_AUTO);
     if(!def_loop) log_fatal("Could not initialize the default libev loop");
-    ev_set_timeout_collect_interval(def_loop, 0.1);
-    ev_set_io_collect_interval(def_loop, 0.01);
 
     // set up primary read/write watchers on the pipe to the daemon's plugin
-    plugin_read_watcher = malloc(sizeof(ev_io));
-    plugin_write_watcher = malloc(sizeof(ev_io));
+    plugin_read_watcher = xmalloc(sizeof(ev_io));
+    plugin_write_watcher = xmalloc(sizeof(ev_io));
     ev_io_init(plugin_write_watcher, plugin_write_cb, plugin_write_fd, EV_WRITE);
     ev_set_priority(plugin_write_watcher, 1);
 
@@ -334,7 +324,7 @@ int main(int argc, char** argv) {
     //   for the daemon's monitoring init cycle, then repeating every interval.
     for(unsigned i = 0; i < num_mons; i++) {
         mon_t* this_mon = &mons[i];
-        this_mon->interval_timer = malloc(sizeof(ev_timer));
+        this_mon->interval_timer = xmalloc(sizeof(ev_timer));
         ev_timer_init(this_mon->interval_timer, mon_interval_cb, 0., this_mon->cmd->interval);
         this_mon->interval_timer->data = this_mon;
         ev_set_priority(this_mon->interval_timer, 0);
@@ -342,21 +332,17 @@ int main(int argc, char** argv) {
 
         // initialize the other watchers in the mon_t here as well,
         //   but do not start them (the interval callback starts them each interval)
-        this_mon->cmd_timeout = malloc(sizeof(ev_timer));
+        this_mon->cmd_timeout = xmalloc(sizeof(ev_timer));
         ev_timer_init(this_mon->cmd_timeout, mon_timeout_cb, 0, 0);
         ev_set_priority(this_mon->cmd_timeout, -1);
         this_mon->cmd_timeout->data = this_mon;
 
-        this_mon->child_watcher = malloc(sizeof(ev_child));
+        this_mon->child_watcher = xmalloc(sizeof(ev_child));
         ev_child_init(this_mon->child_watcher, mon_child_cb, 0, 0);
         this_mon->child_watcher->data = this_mon;
     }
 
     log_info("gdnsd_extmon_helper running");
-
-    // shut off stderr output from here out...
-    dmn_log_close_alt_stderr();
-
     ev_run(def_loop, 0);
     log_info("gdnsd_extmon_helper terminating");
 

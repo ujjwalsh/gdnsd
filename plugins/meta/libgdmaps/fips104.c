@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,6 +24,7 @@
 #include <string.h>
 #include <inttypes.h>
 
+#include <gdnsd/alloc.h>
 #include <gdnsd/dmn.h>
 #include <gdnsd/log.h>
 #include <gdnsd/paths.h>
@@ -130,11 +131,11 @@ fips_t* fips_init(const char* pathname) {
 
     FILE* file = fopen(pathname, "r");
     if(!file)
-        log_fatal("plugin_geoip: Cannot fopen() FIPS region file '%s' for reading: %s", logf_pathname(pathname), logf_errno());
-    fips_t* fips = calloc(1, sizeof(fips_t));
+        log_fatal("plugin_geoip: Cannot fopen() FIPS region file '%s' for reading: %s", pathname, dmn_logf_errno());
+    fips_t* fips = xcalloc(1, sizeof(fips_t));
     fips_parse(fips, file);
     if(fclose(file))
-        log_fatal("plugin_geoip: fclose() of FIPS region file '%s' failed: %s", logf_pathname(pathname), logf_errno());
+        log_fatal("plugin_geoip: fclose() of FIPS region file '%s' failed: %s", pathname, dmn_logf_errno());
     return fips;
 }
 

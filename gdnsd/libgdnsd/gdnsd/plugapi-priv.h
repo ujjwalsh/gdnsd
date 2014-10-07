@@ -20,30 +20,54 @@
 #ifndef GDNSD_PLUGAPI_PRIV_H
 #define GDNSD_PLUGAPI_PRIV_H
 
-#include "gdnsd/plugapi.h"
-#include "gdnsd/vscf.h"
+#include <gdnsd/plugapi.h>
+#include <gdnsd/vscf.h>
+
+struct dyn_result {
+    unsigned edns_scope_mask; // inits to zero
+                              //   should remain zero for global results
+                              //   should be set to cinfo->edns_client_mask if result depends only on cinfo->dns_source
+                              //   if result uses cinfo->edns_source, set as appropriate...
+    bool     is_cname;        // storage contains a CNAME in dname format, assert count_v[46] == 0
+    unsigned count_v4;        // count of IPv4 in v4[], assert !is_cname
+    unsigned count_v6;        // count of IPv6 starting at &storage[v6_offset], assert !is_cname
+    union {
+        uint32_t v4[0];
+        uint8_t  storage[0];
+    };
+};
+
+// Intended for result consumers (dnspacket.c), only valid
+//   after all resolver plugins are finished configuring,
+//   and is static for the life of the daemon from that
+//   point forward (can be cached locally).
+// Return value is the offset into dyn_result.storage where
+//   IPv6 address data begins
+unsigned gdnsd_result_get_v6_offset(void);
+
+// Same rules as above, returns the memory size that
+//   should be allocated for dyn_result
+unsigned gdnsd_result_get_alloc(void);
 
 // MUST call this before loading plugins below,
 //   array can be NULL for just the default
 //   MUST only call this once per program
-void gdnsd_plugins_set_search_path(const vscf_data_t* psearch_array);
+void gdnsd_plugins_set_search_path(vscf_data_t* psearch_array);
 
 F_NONNULL
-const plugin_t* gdnsd_plugin_load(const char* pname);
+plugin_t* gdnsd_plugin_find_or_load(const char* pname);
 
-F_NONNULL
-const plugin_t* gdnsd_plugin_find_or_load(const char* pname);
+// call _load_config() for all plugins which are loaded but have not
+//   yet had that callback called
+void gdnsd_plugins_configure_all(const unsigned num_threads);
 
 // action iterators
-void gdnsd_plugins_action_full_config(const unsigned num_threads);
-void gdnsd_plugins_action_post_daemonize(void);
-void gdnsd_plugins_action_pre_privdrop(void);
 F_NONNULL
 void gdnsd_plugins_action_init_monitors(struct ev_loop* mon_loop);
 F_NONNULL
 void gdnsd_plugins_action_start_monitors(struct ev_loop* mon_loop);
 F_NONNULL
-void gdnsd_plugins_action_pre_run(struct ev_loop* loop);
+void gdnsd_plugins_action_pre_run(void);
 void gdnsd_plugins_action_iothread_init(const unsigned threadnum);
 void gdnsd_plugins_action_exit(void);
 

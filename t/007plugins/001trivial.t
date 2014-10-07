@@ -4,7 +4,7 @@
 use _GDT ();
 use FindBin ();
 use File::Spec ();
-use Test::More tests => 27;
+use Test::More tests => 28;
 
 my $neg_soa = 'example.com 900 SOA ns1.example.com hostmaster.example.com 1 7200 1800 259200 900';
 
@@ -115,7 +115,7 @@ _GDT->test_dns(
 
 _GDT->test_dns(
     qname => 'sfo1.example.com', qtype => 'A',
-    answer => 'sfo1.example.com 43200 A 192.0.2.140',
+    answer => 'sfo1.example.com 86400 A 192.0.2.140',
 );
 
 _GDT->test_dns(
@@ -136,33 +136,33 @@ _GDT->test_dns(
 
 _GDT->test_dns(
     qname => 'sfo5.example.com', qtype => 'AAAA',
-    answer => 'sfo5.example.com 43200 AAAA 2001:DB8::AAA',
-    addtl => 'sfo5.example.com 43200 A 192.0.2.170',
+    answer => 'sfo5.example.com 86399 AAAA 2001:DB8::AAA',
+    addtl => 'sfo5.example.com 86399 A 192.0.2.170',
 );
 
 _GDT->test_dns(
     qname => 'mfo1.example.com', qtype => 'A',
     answer => [
-        'mfo1.example.com 43200 A 192.0.2.101',
-        'mfo1.example.com 43200 A 192.0.2.102',
-        'mfo1.example.com 43200 A 192.0.2.103',
+        'mfo1.example.com 86400 A 192.0.2.101',
+        'mfo1.example.com 86400 A 192.0.2.102',
+        'mfo1.example.com 86400 A 192.0.2.103',
     ],
     addtl => [
-        'mfo1.example.com 43200 AAAA 2001:DB8::101',
-        'mfo1.example.com 43200 AAAA 2001:DB8::102',
+        'mfo1.example.com 86400 AAAA 2001:DB8::101',
+        'mfo1.example.com 86400 AAAA 2001:DB8::102',
     ],
 );
 
 _GDT->test_dns(
     qname => 'mfo1.example.com', qtype => 'AAAA',
     answer => [
-        'mfo1.example.com 43200 AAAA 2001:DB8::101',
-        'mfo1.example.com 43200 AAAA 2001:DB8::102',
+        'mfo1.example.com 86400 AAAA 2001:DB8::101',
+        'mfo1.example.com 86400 AAAA 2001:DB8::102',
     ],
     addtl => [
-        'mfo1.example.com 43200 A 192.0.2.101',
-        'mfo1.example.com 43200 A 192.0.2.102',
-        'mfo1.example.com 43200 A 192.0.2.103',
+        'mfo1.example.com 86400 A 192.0.2.101',
+        'mfo1.example.com 86400 A 192.0.2.102',
+        'mfo1.example.com 86400 A 192.0.2.103',
     ],
 );
 
@@ -186,9 +186,15 @@ _GDT->test_dns(
 _GDT->test_dns(
     qname => 'mfo3.example.com', qtype => 'AAAA',
     answer => [
-        'mfo3.example.com 43200 AAAA 2001:DB8::Deca:fBad',
-        'mfo3.example.com 43200 AAAA 2001:DB8::AD15:eA5e',
+        'mfo3.example.com 86400 AAAA 2001:DB8::Deca:fBad',
+        'mfo3.example.com 86400 AAAA 2001:DB8::AD15:eA5e',
     ],
 );
+
+_GDT->test_dns(
+    qname => 'adyn.example.com', qtype => 'A',
+    answer => 'adyn.example.com 86400 A 192.0.2.41',
+);
+
 
 _GDT->test_kill_daemon($pid);

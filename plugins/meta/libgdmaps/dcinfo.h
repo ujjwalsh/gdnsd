@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@ static const double DEG2RAD = 0.017453292519943295769236907684886;
 typedef struct _dcinfo dcinfo_t;
 
 F_NONNULLX(1, 4)
-dcinfo_t* dcinfo_new(const vscf_data_t* dc_cfg, const vscf_data_t* dc_auto_cfg, const vscf_data_t* dc_auto_limit_cfg, const char* map_name);
+dcinfo_t* dcinfo_new(vscf_data_t* dc_cfg, vscf_data_t* dc_auto_cfg, vscf_data_t* dc_auto_limit_cfg, const char* map_name);
 F_NONNULL F_PURE
 unsigned dcinfo_get_count(const dcinfo_t* info);
 F_NONNULL F_PURE
@@ -44,6 +44,8 @@ F_NONNULLX(1) F_PURE
 unsigned dcinfo_name2num(const dcinfo_t* info, const char* dcname);
 F_NONNULL F_PURE
 const char* dcinfo_num2name(const dcinfo_t* info, const unsigned dcnum);
+F_NONNULL F_PURE
+unsigned dcinfo_map_mon_idx(const dcinfo_t* info, const unsigned dcnum);
 F_NONNULL
 void dcinfo_destroy(dcinfo_t* info);
 

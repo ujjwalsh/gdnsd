@@ -19,10 +19,12 @@
 
 #include "config.h"
 
-#include "gdnsd/plugapi.h"
-#include "gdnsd/plugapi-priv.h"
-#include "gdnsd/log.h"
-#include "gdnsd/net.h"
+#include <gdnsd/alloc.h>
+#include <gdnsd/plugapi.h>
+#include <gdnsd/plugapi-priv.h>
+#include <gdnsd/log.h>
+#include <gdnsd/net.h>
+#include <gdnsd/misc.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -30,24 +32,104 @@
 
 #include "cfg-dirs.h"
 
-void gdnsd_dynaddr_add_result_anysin(dynaddr_result_t* result, const anysin_t* asin) {
+// The default (minimum) values here amount to 240 bytes of address
+//   storage (12*4+12*16), which is less than the minimum allocation
+//   of 256 to store a CNAME, therefore there's no savings trying to
+//   go any smaller.
+static unsigned addrlimit_v4 = 12U;
+static unsigned addrlimit_v6 = 12U;
+static unsigned v6_offset = 12U * 4U;
+
+unsigned gdnsd_result_get_v6_offset(void) { return v6_offset; }
+
+unsigned gdnsd_result_get_alloc(void) {
+    unsigned storage = (addrlimit_v4 * 4U) + (addrlimit_v6 * 16U);
+    if(storage < 256U)
+        storage = 256U; // true minimum set by CNAME storage
+    return sizeof(dyn_result_t) + storage;
+}
+
+void gdnsd_dyn_addr_max(unsigned v4, unsigned v6) {
+    // Note these limits are somewhat arbitrary (with some thought towards 16K-ish limits), but:
+    //   (a) I can't imagine reasonable use-cases hitting them in practice at this time
+    //   (b) There may be other implications for very large values that need to be addressed
+    //     before lifting these limits (e.g. auto-raising max packet size?)
+    if(v4 > 512U)
+        log_fatal("gdnsd cannot cope with plugin configurations which add >512 IPv4 addresses to a single result!");
+    if(v6 > 512U)
+        log_fatal("gdnsd cannot cope with plugin configurations which add >512 IPv6 addresses to a single result!");
+
+    if(v4 > addrlimit_v4) {
+        addrlimit_v4 = v4;
+        v6_offset = v4 * 4U;
+    }
+    if(v6 > addrlimit_v6)
+        addrlimit_v6 = v6;
+}
+
+void gdnsd_result_add_anysin(dyn_result_t* result, const dmn_anysin_t* asin) {
     dmn_assert(result); dmn_assert(asin);
+
+    dmn_assert(!result->is_cname);
     if(asin->sa.sa_family == AF_INET6) {
-        dmn_assert(result->count_v6 < 64);
-        memcpy(&result->addrs_v6[result->count_v6++ * 16], asin->sin6.sin6_addr.s6_addr, 16);
+        dmn_assert(result->count_v6 < addrlimit_v6);
+        memcpy(&result->storage[v6_offset + (result->count_v6++ * 16U)], asin->sin6.sin6_addr.s6_addr, 16);
     }
     else {
         dmn_assert(asin->sa.sa_family == AF_INET);
-        dmn_assert(result->count_v4 < 64);
-        result->addrs_v4[result->count_v4++] = asin->sin.sin_addr.s_addr;
+        dmn_assert(result->count_v4 < addrlimit_v4);
+        result->v4[result->count_v4++] = asin->sin.sin_addr.s_addr;
     }
+}
+
+void gdnsd_result_add_cname(dyn_result_t* result, const uint8_t* dname, const uint8_t* origin) {
+    dmn_assert(result); dmn_assert(dname); dmn_assert(origin);
+    dmn_assert(dname_status(dname) != DNAME_INVALID);
+    dmn_assert(dname_status(origin) == DNAME_VALID);
+    dmn_assert(!result->is_cname);
+    dmn_assert(!result->count_v4);
+    dmn_assert(!result->count_v6);
+
+    result->is_cname = true;
+    dname_copy(result->storage, dname);
+    if(dname_is_partial(result->storage))
+        dname_cat(result->storage, origin);
+    dmn_assert(dname_status(result->storage) == DNAME_VALID);
+}
+
+void gdnsd_result_wipe(dyn_result_t* result) {
+    dmn_assert(result);
+    result->is_cname = false;
+    result->count_v4 = 0;
+    result->count_v6 = 0;
+}
+
+void gdnsd_result_wipe_v4(dyn_result_t* result) {
+    dmn_assert(result);
+    result->count_v4 = 0;
+}
+
+void gdnsd_result_wipe_v6(dyn_result_t* result) {
+    dmn_assert(result);
+    result->count_v6 = 0;
+}
+
+void gdnsd_result_add_scope_mask(dyn_result_t* result, unsigned scope) {
+    dmn_assert(result);
+    if(scope > result->edns_scope_mask)
+        result->edns_scope_mask = scope;
+}
+
+void gdnsd_result_reset_scope_mask(dyn_result_t* result) {
+    dmn_assert(result);
+    result->edns_scope_mask = 0;
 }
 
 static unsigned num_plugins = 0;
 static plugin_t** plugins = NULL;
 static const char** psearch = NULL;
 
-void gdnsd_plugins_set_search_path(const vscf_data_t* psearch_array) {
+void gdnsd_plugins_set_search_path(vscf_data_t* psearch_array) {
     dmn_assert(!psearch); // only called once
 
     // Create a plugin search path array
@@ -55,24 +137,24 @@ void gdnsd_plugins_set_search_path(const vscf_data_t* psearch_array) {
         ? vscf_array_get_len(psearch_array)
         : 0;
 
-    psearch = malloc((psearch_count + 2) * sizeof(const char*));
+    psearch = xmalloc((psearch_count + 2) * sizeof(const char*));
     for(int i = 0; i < psearch_count; i++) {
-        const vscf_data_t* psd = vscf_array_get_data(psearch_array, i);
+        vscf_data_t* psd = vscf_array_get_data(psearch_array, i);
         if(!vscf_is_simple(psd))
             log_fatal("Plugin search paths must be strings");
         psearch[i] = strdup(vscf_simple_get_data(psd));
     }
 
-    psearch[psearch_count++] = GDNSD_LIBDIR;
+    psearch[psearch_count++] = GDNSD_DEFPATH_LIB;
     psearch[psearch_count] = NULL;
 }
 
-const plugin_t* gdnsd_plugin_find(const char* pname) {
+plugin_t* gdnsd_plugin_find(const char* pname) {
     dmn_assert(pname);
 
     const unsigned nplug = num_plugins;
     for(unsigned i = 0; i < nplug; i++) {
-        const plugin_t* const p = plugins[i];
+        plugin_t* p = plugins[i];
         if(!strcmp(pname, p->name))
             return p;
     }
@@ -87,9 +169,10 @@ static plugin_t* plugin_allocate(const char* pname) {
 
     const unsigned this_idx = num_plugins++;
     log_debug("Assigning slot #%u to plugin '%s'", this_idx, pname);
-    plugins = realloc(plugins, num_plugins * sizeof(plugin_t*));
-    plugin_t* rv = plugins[this_idx] = calloc(1, sizeof(plugin_t));
+    plugins = xrealloc(plugins, num_plugins * sizeof(plugin_t*));
+    plugin_t* rv = plugins[this_idx] = xcalloc(1, sizeof(plugin_t));
     rv->name = strdup(pname);
+    rv->config_loaded = false;
 
     return rv;
 }
@@ -101,22 +184,17 @@ static void* plugin_dlopen(const char* pname) {
     struct stat plugstat;
     const char* try_path;
     const char** psptr = psearch;
-    const unsigned pname_len = strlen(pname);
     while((try_path = *psptr++)) {
-        const unsigned try_len = strlen(try_path);
-        const unsigned pp_len = try_len + 8 + pname_len + 4;
-        char pp[pp_len];
-        memcpy(pp, try_path, try_len);
-        memcpy(pp + try_len, "/plugin_", 8);
-        memcpy(pp + try_len + 8, pname, pname_len);
-        memcpy(pp + try_len + 8 + pname_len, ".so\0", 4);
+        char* pp = gdnsd_str_combine_n(4, try_path, "/plugin_", pname, ".so");
         log_debug("Looking for plugin '%s' at pathname '%s'", pname, pp);
         if(0 == stat(pp, &plugstat) && S_ISREG(plugstat.st_mode)) {
             void* phandle = dlopen(pp, RTLD_NOW | RTLD_LOCAL);
             if(!phandle)
                 log_fatal("Failed to dlopen() the '%s' plugin from path '%s': %s", pname, pp, dlerror());
+            free(pp);
             return phandle;
         }
+        free(pp);
     }
 
     log_fatal("Failed to locate plugin '%s' in the plugin search path", pname);
@@ -128,24 +206,15 @@ F_NONNULL
 static gen_func_ptr plugin_dlsym(void* handle, const char* pname, const char* sym_suffix) {
     dmn_assert(handle); dmn_assert(pname); dmn_assert(sym_suffix);
 
-    // construct the full symbol name plugin_PNAME_SYMSUFFIX\0
-    const unsigned pname_len = strlen(pname);
-    const unsigned suffix_len = strlen(sym_suffix);
-    const unsigned sym_size = 7 + pname_len + 1 + suffix_len + 1;
-    char symname[sym_size];
-    memcpy(symname, "plugin_", 7);
-    memcpy(symname + 7, pname, pname_len);
-    memcpy(symname + 7 + pname_len, "_", 1);
-    memcpy(symname + 7 + pname_len + 1, sym_suffix, suffix_len);
-    memcpy(symname + 7 + pname_len + 1 + suffix_len, "\0", 1);
-
     // If you see an aliasing warning here, it's ok to ignore it
+    char* symname = gdnsd_str_combine_n(4, "plugin_", pname, "_", sym_suffix);
     gen_func_ptr rval;
     *(void**)(&rval) = dlsym(handle, symname);
+    free(symname);
     return rval;
 }
 
-const plugin_t* gdnsd_plugin_load(const char* pname) {
+static plugin_t* gdnsd_plugin_load(const char* pname) {
     dmn_assert(pname); dmn_assert(psearch);
 
     plugin_t* plug = plugin_allocate(pname);
@@ -160,18 +229,14 @@ const plugin_t* gdnsd_plugin_load(const char* pname) {
 
 #   define PSETFUNC(x) plug->x = (gdnsd_ ## x ## _cb_t)plugin_dlsym(pptr, pname, #x);
     PSETFUNC(load_config)
-    PSETFUNC(map_resource_dyna)
-    PSETFUNC(map_resource_dync)
-    PSETFUNC(full_config)
-    PSETFUNC(post_daemonize)
-    PSETFUNC(pre_privdrop)
+    PSETFUNC(map_res)
     PSETFUNC(pre_run)
     PSETFUNC(iothread_init)
-    PSETFUNC(resolve_dynaddr)
-    PSETFUNC(resolve_dyncname)
+    PSETFUNC(resolve)
     PSETFUNC(exit)
     PSETFUNC(add_svctype)
-    PSETFUNC(add_monitor)
+    PSETFUNC(add_mon_addr)
+    PSETFUNC(add_mon_cname)
     PSETFUNC(init_monitors)
     PSETFUNC(start_monitors)
 #   undef PSETFUNC
@@ -181,30 +246,21 @@ const plugin_t* gdnsd_plugin_load(const char* pname) {
     return plug;
 }
 
-const plugin_t* gdnsd_plugin_find_or_load(const char* pname) {
+plugin_t* gdnsd_plugin_find_or_load(const char* pname) {
     dmn_assert(pname);
-    const plugin_t* const p = gdnsd_plugin_find(pname);
+    plugin_t* p = gdnsd_plugin_find(pname);
     return p ? p : gdnsd_plugin_load(pname);
 }
 
 // The action iterators...
 
-void gdnsd_plugins_action_full_config(const unsigned num_threads) {
-    for(unsigned i = 0; i < num_plugins; i++)
-        if(plugins[i]->full_config)
-            plugins[i]->full_config(num_threads);
-}
-
-void gdnsd_plugins_action_post_daemonize(void) {
-    for(unsigned i = 0; i < num_plugins; i++)
-        if(plugins[i]->post_daemonize)
-            plugins[i]->post_daemonize();
-}
-
-void gdnsd_plugins_action_pre_privdrop(void) {
-    for(unsigned i = 0; i < num_plugins; i++)
-        if(plugins[i]->pre_privdrop)
-            plugins[i]->pre_privdrop();
+void gdnsd_plugins_configure_all(const unsigned num_threads) {
+    for(unsigned i = 0; i < num_plugins; i++) {
+        if(plugins[i]->load_config && !plugins[i]->config_loaded) {
+            plugins[i]->load_config(NULL, num_threads);
+            plugins[i]->config_loaded = true;
+        }
+    }
 }
 
 void gdnsd_plugins_action_init_monitors(struct ev_loop* mon_loop) {
@@ -219,10 +275,10 @@ void gdnsd_plugins_action_start_monitors(struct ev_loop* mon_loop) {
             plugins[i]->start_monitors(mon_loop);
 }
 
-void gdnsd_plugins_action_pre_run(struct ev_loop* loop) {
+void gdnsd_plugins_action_pre_run(void) {
     for(unsigned i = 0; i < num_plugins; i++)
         if(plugins[i]->pre_run)
-            plugins[i]->pre_run(loop);
+            plugins[i]->pre_run();
 }
 
 void gdnsd_plugins_action_iothread_init(const unsigned threadnum) {
@@ -236,4 +292,3 @@ void gdnsd_plugins_action_exit(void) {
         if(plugins[i]->exit)
             plugins[i]->exit();
 }
-

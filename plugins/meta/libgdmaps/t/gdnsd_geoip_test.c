@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -34,16 +34,17 @@
 #include <gdnsd/log.h>
 #include <gdnsd/vscf.h>
 #include <gdnsd/plugapi.h>
+#include <gdnsd/paths-priv.h>
 
 #include "gdmaps.h"
 #include "gdmaps_test.h"
 
 static void usage(const char* argv0) {
-    fprintf(stderr, "\nUsage: %s [-d <rootdir> ] [map_name addr]\n"
-        "  -d\t\tgdnsd rootdir, see main gdnsd(8) manpage for details\n"
+    fprintf(stderr, "\nUsage: %s [-c %s] [map_name addr]\n"
+        "  -c\t\tgdnsd config dir, see main gdnsd(8) manpage for details\n"
         "  map_name\tMapping name from geoip plugin config\n"
         "  addr\t\tClient IP address to map.\n\n",
-        argv0);
+        argv0, gdnsd_get_default_config_dir());
     exit(1);
 }
 
@@ -71,7 +72,7 @@ static void do_lookup(const gdmaps_t* gdmaps, const char* map_name, const char* 
     }
 
     // To void gdmaps fallback pitfalls
-    memcpy(&cinfo.dns_source, &cinfo.edns_client, sizeof(anysin_t));
+    memcpy(&cinfo.dns_source, &cinfo.edns_client, sizeof(dmn_anysin_t));
 
     // w/ edns_client_mask set, scope_mask should *always* be set by gdmaps_lookup();
     // (and regardless, dclist should also always be set and contain something)
@@ -86,14 +87,14 @@ static void do_lookup(const gdmaps_t* gdmaps, const char* map_name, const char* 
     if(scope_mask == 150U) {
         printf(
             "%s => %s => %s\n",
-            map_name, logf_anysin_noport(&cinfo.edns_client),
+            map_name, dmn_logf_anysin_noport(&cinfo.edns_client),
             gdmaps_logf_dclist(gdmaps, map_idx, dclist)
         );
     }
     else {
         printf(
             "%s => %s/%u => %s\n",
-            map_name, logf_anysin_noport(&cinfo.edns_client), scope_mask,
+            map_name, dmn_logf_anysin_noport(&cinfo.edns_client), scope_mask,
             gdmaps_logf_dclist(gdmaps, map_idx, dclist)
         );
     }
@@ -116,7 +117,7 @@ static void do_repl(gdmaps_t* gdmaps) {
         }
         if(!fgets(linebuf, 255, stdin)) {
             if(!feof(stdin))
-                log_err("fgets(stdin) failed: %s", logf_errnum(ferror(stdin)));
+                log_err("fgets(stdin) failed: %s", dmn_logf_strerror(ferror(stdin)));
             if(have_tty)
                 fputs("\n", stdout);
             return;
@@ -132,24 +133,24 @@ static void do_repl(gdmaps_t* gdmaps) {
 }
 
 int main(int argc, char* argv[]) {
-    const char* input_rootdir = NULL;
+    const char* input_cfgdir = NULL;
     const char* map_name = NULL;
     const char* ip_arg = NULL;
 
     switch(argc) {
-        // gdnsd_geoip_test -d x map_name ip
+        // gdnsd_geoip_test -c x map_name ip
         case 5:
-            if(strcmp(argv[1], "-d")) usage(argv[0]);
-            input_rootdir = argv[2];
+            if(strcmp(argv[1], "-c")) usage(argv[0]);
+            input_cfgdir = argv[2];
             map_name = argv[3];
             ip_arg = argv[4];
             break;
         // gdnsd_geoip_test map_name ip
         //   -or-
-        // gdnsd_geoip_test -d x
+        // gdnsd_geoip_test -c x
         case 3:
-            if(!strcmp(argv[1], "-d")) {
-                input_rootdir = argv[2];
+            if(!strcmp(argv[1], "-c")) {
+                input_cfgdir = argv[2];
             }
             else {
                 map_name = argv[1];
@@ -163,7 +164,7 @@ int main(int argc, char* argv[]) {
             usage(argv[0]);
     }
 
-    gdmaps_t* gdmaps = gdmaps_test_init(input_rootdir);
+    gdmaps_t* gdmaps = gdmaps_test_init(input_cfgdir);
 
     if(map_name) {
         dmn_assert(ip_arg);
@@ -173,6 +174,6 @@ int main(int argc, char* argv[]) {
         do_repl(gdmaps);
     }
 
-    gdmaps_destroy(gdmaps);
+    return 0;
 }
 

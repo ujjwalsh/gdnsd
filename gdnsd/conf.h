@@ -27,10 +27,9 @@
 #include <pthread.h>
 
 typedef struct {
-    anysin_t addr;
+    dmn_anysin_t addr;
     bool autoscan;
     unsigned dns_port;
-    unsigned late_bind_secs;
     unsigned udp_recv_width;
     unsigned udp_sndbuf;
     unsigned udp_rcvbuf;
@@ -46,14 +45,13 @@ typedef struct {
     unsigned threadnum;
     int sock;
     bool is_udp;
-    bool need_late_bind;
-    bool autoscan_bind_failed;
+    bool bind_success;
 } dns_thread_t;
 
 typedef struct {
     dns_addr_t*    dns_addrs;
     dns_thread_t*  dns_threads;
-    anysin_t*      http_addrs;
+    dmn_anysin_t*  http_addrs;
     const char*    username;
     const uint8_t* chaos;
     bool     include_optional_ns;
@@ -61,13 +59,15 @@ typedef struct {
     bool     lock_mem;
     bool     disable_text_autosplit;
     bool     edns_client_subnet;
-    bool     monitor_force_v6_up;
     bool     zones_strict_data;
     bool     zones_strict_startup;
     bool     zones_rfc1035_auto;
     int      priority;
     unsigned chaos_len;
     unsigned zones_default_ttl;
+    unsigned max_ncache_ttl;
+    unsigned max_ttl;
+    unsigned min_ttl;
     unsigned log_stats;
     unsigned max_http_clients;
     unsigned http_timeout;
@@ -75,6 +75,7 @@ typedef struct {
     unsigned num_dns_addrs;
     unsigned num_dns_threads;
     unsigned max_response;
+    unsigned max_edns_response;
     unsigned max_cname_depth;
     unsigned max_addtl_rrsets;
     unsigned zones_rfc1035_auto_interval;
@@ -84,15 +85,14 @@ typedef struct {
 
 extern global_config_t gconfig;
 
-F_NONNULL
-void conf_load(const bool force_zss, const bool force_zsd);
+typedef enum {
+    CONF_SIMPLE_ACTION = 0, // only picks up directory settings for e.g. reload-zones/status/stop
+    CONF_CHECK = 1,         // full config for checking only (do not write to disk)
+    CONF_START = 2,         // full config + necessary writes for startup (e.g. create run/state dirs)
+} conf_mode_t;
 
-// retval indicates we need runtime CAP_NET_BIND_DEVICE
-bool dns_lsock_init(void);
+void conf_load(const char* cfg_file, const bool force_zss, const bool force_zsd, const conf_mode_t cmode);
 
-// utility function, must be AF_INET or AF_INET6 already,
-//  used by dnsio_udp
-F_NONNULL F_PURE
-bool is_any_addr(const anysin_t* asin);
+void dns_lsock_init(void);
 
 #endif // GDNSD_CONF_H

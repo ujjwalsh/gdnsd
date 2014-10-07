@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -37,6 +37,5 @@ int main(int argc, char* argv[]) {
     gdmaps_test_lookup_check(tnum++, gdmaps, "my_prod_map", "10.0.0.44", "\4\2", 24); // Custom 'nets' entry
     gdmaps_test_lookup_check(tnum++, gdmaps, "my_prod_map", "10.0.1.44", "", 24); // Custom 'nets' entry, empty
     gdmaps_test_lookup_check(tnum++, gdmaps, "my_prod_map", "192.168.1.1", "\1\2\3\4\5", 16); // meta-default, no loc
-    gdmaps_destroy(gdmaps);
 }
 

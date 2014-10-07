@@ -139,6 +139,9 @@ our $ALTZONES_IN = $FindBin::Bin . '/altzones/';
 #   tests to work accurately!
 $ENV{GDNSD_TESTSUITE_NO_ZONEFILE_MODS} = 1;
 
+# generic flag to eliminate various timer delays under testing
+$ENV{GDNSD_TESTSUITE_NODELAY} = 1;
+
 our $TEST_RUNNER = "";
 if($ENV{TEST_RUNNER}) {
     $TEST_RUNNER = $ENV{TEST_RUNNER};
@@ -228,6 +231,7 @@ my %stats_accum = (
     edns_clientsub => 0,
     udp_reqs     => 0,
     udp_sendfail => 0,
+    udp_recvfail => 0,
     udp_tc       => 0,
     udp_edns_big => 0,
     udp_edns_tc  => 0,
@@ -330,17 +334,24 @@ sub proc_tmpl {
         ? qq{[ 127.0.0.1, ::1 ]}
         : qq{127.0.0.1};
 
+    my $std_opts = qq{
+        listen => $dns_lspec
+        http_listen => $http_lspec
+        dns_port => $DNS_PORT
+        http_port => $HTTP_PORT
+        plugin_search_path = $PLUGIN_PATH
+        run_dir = $OUTDIR/run/gdnsd
+        state_dir = $OUTDIR/var/lib/gdnsd
+        realtime_stats = true
+    };
+
     if($PRIVDROP_USER) {
-        $dns_lspec .= "\nusername = $PRIVDROP_USER";
+        $std_opts .= qq{username = $PRIVDROP_USER\n};
     }
 
     while(<$in_fh>) {
-        s/\@dns_lspec\@/$dns_lspec/g;
-        s/\@http_lspec\@/$http_lspec/g;
-        s/\@dns_port\@/$DNS_PORT/g;
-        s/\@http_port\@/$HTTP_PORT/g;
+        s/\@std_testsuite_options\@/$std_opts/g;
         s/\@extra_port\@/$EXTRA_PORT/g;
-        s/\@pluginpath\@/$PLUGIN_PATH/g;
         # if the test used the extmon helper, pre-execute
         #   it now to do libtool stuff before privdrop, in case
         #   of testsuite running as root.  Otherwise on first
@@ -399,14 +410,14 @@ sub daemon_abort {
     die "gdnsd failed to finish starting properly.  output (if any):\n" . $gdout;
 }
 
-sub spawn_daemon {
+sub spawn_daemon_setup {
     my ($class, $etcsrc, $geoip_data) = @_;
 
     $etcsrc ||= "etc";
 
     safe_rmtree($OUTDIR);
 
-    foreach my $d ($OUTDIR, "${OUTDIR}/etc") {
+    foreach my $d ($OUTDIR, "${OUTDIR}/etc", "${OUTDIR}/run", "${OUTDIR}/var", "${OUTDIR}/var/lib") {
         mkdir $d or die "Cannot create directory $d: $!";
     }
 
@@ -418,10 +429,12 @@ sub spawn_daemon {
     }
 
     recursive_templated_copy("${FindBin::Bin}/${etcsrc}", "${OUTDIR}/etc");
+}
 
+sub spawn_daemon_execute {
     my $exec_line = $TEST_RUNNER
-        ? qq{$TEST_RUNNER $GDNSD_BIN -d $OUTDIR startfg}
-        : qq{$GDNSD_BIN -d $OUTDIR startfg};
+        ? qq{$TEST_RUNNER $GDNSD_BIN -Dfc $OUTDIR/etc start}
+        : qq{$GDNSD_BIN -Dfc $OUTDIR/etc start};
 
     my $daemon_out = $OUTDIR . '/gdnsd.out';
 
@@ -473,7 +486,41 @@ sub test_spawn_daemon {
     foreach my $k (keys %stats_accum) { $stats_accum{$k} = 0; }
 
     local $Test::Builder::Level = $Test::Builder::Level + 1;
-    my $pid = eval{$class->spawn_daemon(@_)};
+    my $pid = eval{
+        $class->spawn_daemon_setup(@_);
+        $class->spawn_daemon_execute();
+    };
+    unless(Test::More::ok(!$@ && $pid)) {
+        Test::More::diag("Cannot spawn daemon: $@");
+        Test::More::BAIL_OUT($@);
+    }
+
+    return $pid;
+}
+
+sub test_spawn_daemon_setup {
+    my $class = shift;
+
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+    eval{
+        $class->spawn_daemon_setup(@_);
+    };
+    unless(Test::More::ok(!$@)) {
+        Test::More::diag("Cannot setup daemon: $@");
+        Test::More::BAIL_OUT($@);
+    }
+}
+
+sub test_spawn_daemon_execute {
+    my $class = shift;
+
+    # reset stats if daemon run multiple times in one testfile
+    foreach my $k (keys %stats_accum) { $stats_accum{$k} = 0; }
+
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+    my $pid = eval{
+        $class->spawn_daemon_execute();
+    };
     unless(Test::More::ok(!$@ && $pid)) {
         Test::More::diag("Cannot spawn daemon: $@");
         Test::More::BAIL_OUT($@);
@@ -484,10 +531,10 @@ sub test_spawn_daemon {
 
 ##### START RELOAD STUFF
 
-sub send_sighup_unless_inotify {
+sub send_sigusr1_unless_inotify {
     if(!$INOTIFY_ENABLED) {
-        kill(1, $saved_pid)
-            or die "Cannot send SIGHUP to gdnsd at pid $saved_pid";
+        kill('SIGUSR1', $saved_pid)
+            or die "Cannot send SIGUSR1 to gdnsd at pid $saved_pid";
     }
 }
 
@@ -504,7 +551,7 @@ sub test_log_output {
     # $retry_delay doubles after each wait...
     my $retry_delay = 0.1;
     my $retry = $TEST_RUNNER ? 10 : 9;
-    while(scalar(keys %$texts) && $retry--) {
+    while($retry--) {
         while(scalar(keys %$texts) && ($_ = <$GDOUT_FH>)) {
             foreach my $k (keys %$texts) {
                 my $this_text = $texts->{$k};
@@ -514,8 +561,18 @@ sub test_log_output {
                 }
             }
         }
+        if(scalar(keys %$texts)) {
+            select(undef, undef, undef, $retry_delay);
+            $retry_delay *= 2;
+        }
+        else { last; }
+    }
+
+    # do a final delay under valgrind, because technically it's often
+    #   the case that we still have a prcu swap to do after the log
+    #   message is emitted, before test results are reliable...
+    if($TEST_RUNNER) {
         select(undef, undef, undef, $retry_delay);
-        $retry_delay *= 2;
     }
 
     if(!scalar(keys %$texts)) {
@@ -539,6 +596,19 @@ sub delete_altzone {
     my ($class, $fn) = @_;
     unlink($OUTDIR . "/etc/zones/$fn")
         or die "Failed to unlink zonefile '$fn': $!";
+}
+
+sub write_statefile {
+    my ($class, $fn, $content) = @_;
+    $fn = $OUTDIR . '/var/lib/gdnsd/' . $fn;
+    my $fn_tmp = "${fn}.tmp";
+    open(my $fd_tmp, ">$fn_tmp")
+        or die "Cannot open state file '$fn_tmp' for writing: $!";
+    print $fd_tmp $content;
+    close($fd_tmp)
+        or die "Cannot close state file '$fn_tmp': $!";
+    rename($fn_tmp, $fn)
+        or die "Cannot rename('$fn_tmp', '$fn'): $!";
 }
 
 ##### END RELOAD STUFF
@@ -1053,11 +1123,11 @@ sub test_kill_daemon {
         eval {
             local $SIG{ALRM} = sub { die "Failed to kill daemon cleanly at pid $pid"; };
             alarm($TEST_RUNNER ? 60 : 30);
-            kill(2, $pid);
+            kill('SIGTERM', $pid);
             waitpid($pid, 0);
         };
         if($@) {
-            kill(9, $pid);
+            kill('SIGKILL', $pid);
             waitpid($pid, 0);
             Test::More::ok(0);
             Test::More::BAIL_OUT($@);
@@ -1067,14 +1137,10 @@ sub test_kill_daemon {
     Test::More::ok(1);
 }
 
-my $EDNS_CLIENTSUB_OPTCODE_IANA = 0x0008;
-my $EDNS_CLIENTSUB_OPTCODE_DEPRECATED = 0x50fa;
+my $EDNS_CLIENTSUB_OPTCODE = 0x0008;
 sub optrr_clientsub {
     my %args = @_;
     $args{scope_mask} ||= 0;
-    my $which_code = (defined $args{deprecated_clientsub_optcode})
-        ? $EDNS_CLIENTSUB_OPTCODE_DEPRECATED
-        : $EDNS_CLIENTSUB_OPTCODE_IANA;
 
     my %option;
 
@@ -1083,11 +1149,11 @@ sub optrr_clientsub {
         my $addr_bytes = ($src_mask >> 3) + (($src_mask & 7) ? 1 : 0);
         if(defined $args{addr_v4}) {
             $option{optiondata} = pack('nCCa' . $addr_bytes, 1, $args{src_mask}, $args{scope_mask}, inet_pton(AF_INET, $args{addr_v4}));
-            $option{optioncode} = $which_code;
+            $option{optioncode} = $EDNS_CLIENTSUB_OPTCODE;
         }
         else {
             $option{optiondata} = pack('nCCa' . $addr_bytes, 2, $args{src_mask}, $args{scope_mask}, inet_pton(AF_INET6, $args{addr_v6}));
-            $option{optioncode} = $which_code;
+            $option{optioncode} = $EDNS_CLIENTSUB_OPTCODE;
         }
     }
 
@@ -1095,12 +1161,12 @@ sub optrr_clientsub {
         type => "OPT",
         ednsversion => 0,
         name => "",
-        class => 1280,
+        class => 1024,
         extendedrcode => 0,
         ednsflags => 0,
         %option,
     );
 }
 
-END { kill(9, $saved_pid) if $saved_pid; }
+END { kill('SIGKILL', $saved_pid) if $saved_pid; }
 1;

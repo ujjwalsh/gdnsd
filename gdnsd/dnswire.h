@@ -21,21 +21,23 @@
 #define GDNSD_DNSWIRE_H
 
 #include "config.h"
-#include "gdnsd/compiler.h"
+#include <gdnsd/compiler.h>
 #include <inttypes.h>
 
 // Our UDP input buffers are shared with output buffer
 //  space, and the output buffer size in turn has
 //  a minimum size of 4K, default 16K.
-// However, we only advertise a buffer size of 1280 (IPv6
-//  Min MTU) via EDNS0.
+// However, we only advertise a buffer size of 1024,
+//  to be absolutely sure that even in the face of
+//  an IPv6 min-MTU link and lots of extra headers
+//  and whatnot, it will always be a single fragment.
 // We use this size as our recvmsg() limit as well,
 //  discarding anything larger to save ourselves
-//  processing it.  Really, we could even advertise
-//  512 here since, we don't support anything
+//  processing it.  Really we could even advertise
+//  512 here since we don't support anything
 //  that warrants larger input sizes, but this is
 //  reasonable.
-#define DNS_EDNS0_SIZE 1280U
+#define DNS_EDNS0_SIZE 1024U
 #define DNS_RECV_SIZE DNS_EDNS0_SIZE
 
 /*** Wire formats ***/
@@ -102,9 +104,7 @@ typedef struct S_PACKED {
 #define DNS_OPTRR_GET_EXTRCODE(_r) ((uint8_t)(ntohl((_r)->extflags) >> 24))
 #define DNS_OPTRR_GET_VERSION(_r)  ((uint8_t)((ntohl((_r)->extflags) & 0x00FF0000) >> 16))
 
-// The second one here should be removed, eventually...
-#define EDNS_CLIENTSUB_OPTCODE_IANA 0x0008
-#define EDNS_CLIENTSUB_OPTCODE_DEPRECATED 0x50fa
+#define EDNS_CLIENTSUB_OPTCODE 0x0008
 
 /* DNS RR Types */
 #define DNS_TYPE_A	1
@@ -118,13 +118,21 @@ typedef struct S_PACKED {
 #define DNS_TYPE_SRV	33
 #define DNS_TYPE_NAPTR	35
 #define DNS_TYPE_OPT	41
-#define DNS_TYPE_SPF	99
 #define DNS_TYPE_IXFR   251
 #define DNS_TYPE_AXFR   252
 #define DNS_TYPE_ANY    255
 
 #define DNS_CLASS_IN	1
 #define DNS_CLASS_ANY	255
+
+// Our own synthetic 'type' for DYNC
+//   Note that current standards mark
+//   the range 0xFF00 -> 0xFFFF for
+//   "private use".  We never intend
+//   to read this from or write this
+//   to packets on the wire, it's just
+//   for the internal database...
+#define DNS_TYPE_DYNC    0xFF0F
 
 /* Network-order TYPE+CLASS as a 32-bit uint */
 
@@ -145,6 +153,5 @@ static const uint32_t DNS_RRFIXED_AAAA  = _mkrrf(DNS_TYPE_AAAA, DNS_CLASS_IN);
 static const uint32_t DNS_RRFIXED_SRV   = _mkrrf(DNS_TYPE_SRV, DNS_CLASS_IN);
 static const uint32_t DNS_RRFIXED_NAPTR = _mkrrf(DNS_TYPE_NAPTR, DNS_CLASS_IN);
 static const uint32_t DNS_RRFIXED_OPT   = _mkrrf(DNS_TYPE_OPT, DNS_CLASS_IN);
-static const uint32_t DNS_RRFIXED_SPF   = _mkrrf(DNS_TYPE_SPF, DNS_CLASS_IN);
 
 #endif // GDNSD_DNSWIRE_H

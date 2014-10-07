@@ -20,77 +20,107 @@
 #ifndef GDNSD_MON_H
 #define GDNSD_MON_H
 
-// For stats_t, etc...
-#include <gdnsd/stats.h>
+#include <inttypes.h>
+
+// For anysin stuff
 #include <gdnsd/net.h>
 
-/* mon_state == stats, but these define
- * wrappers may make it easier if we
- * have to move to another mechanism
- * later.
- */
-#define MON_STATE_UNINIT 0
-#define MON_STATE_DOWN   1
-#define MON_STATE_DANGER 2
-#define MON_STATE_UP     3
-typedef stats_t mon_state_t;
-typedef stats_uint_t mon_state_uint_t;
+// gdnsd_sttl_t
+//  sttl -> state+ttl
+//  high-bit is down flag (1 = down, 0 = up)
+//  next-bit is forced flag (1 = forced, 0 = unforced)
+//  next 2 bits reserved for future use (set to zero, ignored on read)
+//  remaining 28 bits are unsigned TTL (max value ~8.5 years)
+typedef uint32_t gdnsd_sttl_t;
 
+static const gdnsd_sttl_t GDNSD_STTL_DOWN          = (1U << 31U);
+static const gdnsd_sttl_t GDNSD_STTL_FORCED        = (1U << 30U);
+static const gdnsd_sttl_t GDNSD_STTL_RESERVED_MASK = (3U << 28U);
+static const gdnsd_sttl_t GDNSD_STTL_TTL_MASK      = ((1U << 28U) - 1U);
+static const gdnsd_sttl_t GDNSD_STTL_TTL_MAX       = ((1U << 28U) - 1U);
+// ^ identical to above, but better semantics when reading code
+
+// the only hard rule on this data type is zero in the reserved bits for now
+#define assert_valid_sttl(_x) dmn_assert(!((_x) & GDNSD_STTL_RESERVED_MASK))
+
+// Parses a string of the form STATE[/TTL], where STATE is UP or DOWN and
+//   the TTL is in the legal range 0 through 2^28-1.  Returns 0 on success.
+// This is exported mostly so that it can be shared with plugin_extfile,
+//   I don't know if anything else will ever use it.
 F_NONNULL
-mon_state_uint_t gdnsd_mon_get_min_state(const mon_state_t* states, const unsigned num_states);
+bool gdnsd_mon_parse_sttl(const char* sttl_str, gdnsd_sttl_t* sttl_out, unsigned def_ttl);
 
-// Your plugin owns all of the storage within or pointed to
-//  by mon_list_t, and it must be durable storage
-//  at the time _load_config() returns.  You are free to destroy
-//  it during later callbacks, keeping in mind that the actual
-//  mon_state_t pointed to by mon_info_t.state_ptr must
-//  exist during normal operations for the monitoring code to
-//  send status updates through.  It can only be de-allocated
-//  at plugin _exit() time.
-// It is also permissible for pointers inside of mon_list_t to
-//  directly reference temporary storage from vscf, (e.g. the
-//  "const char*" returned by vscf_simple_get_data()), as the
-//  vscf config tree won't be destroyed until the daemon is
-//  done processing your mon_list_t.
+// sttl log formatter's output looks like:
+// "DOWN/1234(FORCED)"
+// where (FORCED) is only present on the forced flag,
+//   and the special TTLs 0 and 268435455 are given
+//   as the strings "MIN" and "MAX" for clarity.
+const char* gdnsd_logf_sttl(const gdnsd_sttl_t s);
+#define logf_sttl gdnsd_logf_sttl
 
-// If svctype_name is NULL, it will be interpreted as "default".
-// Other arguments are required.
-// "desc" is just descriptive, used for stats/log output.
-
-typedef struct {
-    const char* svctype;
-    const char* desc;
-    const char* addr;
-    mon_state_t* state_ptr;
-} mon_info_t;
-
-typedef struct {
-    unsigned count;
-    mon_info_t* info;
-} mon_list_t;
-
-// This is for monitoring plugins rather than resolver plugins.  Most
-//   plugins will want to treat it as mostly opaque other than using
-//   "desc" for log/debug output, and reading "addr" during
-//   the _add_monitor callback (copying it for use in your own data).
-typedef struct _service_type_struct service_type_t;
-typedef struct {
-    anysin_t addr;
-    mon_state_t** mon_state_ptrs;
-    service_type_t* svc_type;
-    const char* desc;
-    unsigned num_state_ptrs;
-    unsigned up_thresh;
-    unsigned ok_thresh;
-    unsigned down_thresh;
-    unsigned n_failure;
-    unsigned n_success;
-} mon_smgr_t;
-
-// Plugins call this helper after every raw state check of a monitored
-//   address, so that it can manage long-term state.
+// A simple monitoring plugins calls this helper after every raw
+//   state check of a monitored address.  The core tracks long
+//   term state history for anti-flap and calculates TTLs on
+//   the assumption the plugin is using the provided intervals
+//   and has no deeper information than the immediate check result.
 // latest -> 0 failed, 1 succeeded
+void gdnsd_mon_state_updater(unsigned idx, const bool latest);
+
+// A more-advanced monitoring plugin may wish to do its own
+//   anti-flap state-tracking and TTL-calculations, in which
+//   case it can use this interface to provide full, direct updates.
+// NOTE: it is not legal for any monitoring plugin to set the FORCED
+//   bit in "new_sttl" - this is checked as an assertion!
+void gdnsd_mon_sttl_updater(unsigned idx, gdnsd_sttl_t new_sttl);
+
+// called during load_config to register address healthchecks, returns
+//   an index to check state with...
 F_NONNULL
-void gdnsd_mon_state_updater(mon_smgr_t* smgr, const bool latest);
+unsigned gdnsd_mon_addr(const char* svctype_name, const dmn_anysin_t* addr);
+
+// as above for a CNAME
+F_NONNULL
+unsigned gdnsd_mon_cname(const char* svctype_name, const char* cname, const uint8_t* dname);
+
+// admin-only state registration.  plugin constructs desc
+//   within its own scope, e.g.
+//     "plugname/resname/dcname" for a datacenter virtual.
+//   it is up to the plugin to ensure uniqueness here...
+F_NONNULL
+unsigned gdnsd_mon_admin(const char* desc);
+
+// State-fetching (one table call per resolve invocation, reused
+//   for as many index fetches as necc)
+const gdnsd_sttl_t* gdnsd_mon_get_sttl_table(void);
+
+// Given two sttl values, combine them according to the following rules:
+//   1) result TTL is the lesser of both TTLs
+//   2) if either is down, result is down
+//   3) if either is forced, result is forced
+// This is meant to be used to combine parallel results, e.g. two
+//   service checks on the same IP address.
+// Note that currently, users of this don't actually care about the forced-bit.
+// If they did, we'd probably want a more correct (and expensive) method of
+//   combining the state-bits, such that the output forced-bit is only copied if
+//   the forcing had an effect (e.g. forced-down + unforced-down = unforced-down)
+F_PURE
+static inline gdnsd_sttl_t gdnsd_sttl_min2(const gdnsd_sttl_t a, const gdnsd_sttl_t b) {
+    const gdnsd_sttl_t a_ttl = a & GDNSD_STTL_TTL_MASK;
+    const gdnsd_sttl_t b_ttl = b & GDNSD_STTL_TTL_MASK;
+    const gdnsd_sttl_t state = (a | b) & (GDNSD_STTL_DOWN | GDNSD_STTL_FORCED);
+    return (a_ttl < b_ttl) ? (state | a_ttl) : (state | b_ttl);
+}
+
+// As above, but generalized to an array of table indices to support merging
+//   several different service_type checks against a single IP for
+//   a single resource.
+F_NONNULLX(1) F_PURE
+static inline gdnsd_sttl_t gdnsd_sttl_min(const gdnsd_sttl_t* sttl_tbl, const unsigned* idx_ary, const unsigned idx_ary_len) {
+    dmn_assert(sttl_tbl);
+    gdnsd_sttl_t rv = GDNSD_STTL_TTL_MAX;
+    for(unsigned i = 0; i < idx_ary_len; i++)
+        rv = gdnsd_sttl_min2(rv, sttl_tbl[idx_ary[i]]);
+    return rv;
+}
 
 #endif // GDNSD_MON_H

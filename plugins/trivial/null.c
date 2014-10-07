@@ -23,15 +23,29 @@
 #include <gdnsd/plugin.h>
 #include <string.h>
 
-bool plugin_null_resolve_dynaddr(unsigned threadnum V_UNUSED, unsigned resnum V_UNUSED, const client_info_t* cinfo V_UNUSED, dynaddr_result_t* result) {
-    result->count_v4 = 1;
-    result->count_v6 = 1;
-    result->addrs_v4[0] = 0;
-    memset(result->addrs_v6, 0, 16);
-    return true;
+void plugin_null_load_config(vscf_data_t* config V_UNUSED, const unsigned num_threads V_UNUSED) {
+    gdnsd_dyn_addr_max(1, 1); // null only ever returns a single IP from each family
 }
-void plugin_null_resolve_dyncname(unsigned threadnum V_UNUSED, unsigned resnum V_UNUSED, const uint8_t* origin V_UNUSED, const client_info_t* cinfo V_UNUSED, dyncname_result_t* result) {
-    gdnsd_dname_from_string(result->dname, (const uint8_t*)"invalid.", 8);
+
+int plugin_null_map_res(const char* resname V_UNUSED, const uint8_t* origin V_UNUSED) {
+    return 0;
+}
+
+gdnsd_sttl_t plugin_null_resolve(unsigned resnum V_UNUSED, const uint8_t* origin, const client_info_t* cinfo V_UNUSED, dyn_result_t* result) {
+    if(origin) {
+        uint8_t cntmp[256];
+        gdnsd_dname_from_string(cntmp, "invalid.", 8);
+        gdnsd_result_add_cname(result, cntmp, origin);
+    }
+    else {
+        dmn_anysin_t tmpsin;
+        gdnsd_anysin_fromstr("0.0.0.0", 0, &tmpsin);
+        gdnsd_result_add_anysin(result, &tmpsin);
+        gdnsd_anysin_fromstr("[::]", 0, &tmpsin);
+        gdnsd_result_add_anysin(result, &tmpsin);
+    }
+
+    return GDNSD_STTL_TTL_MAX;
 }
 
 // Obviously, we could implement "null" monitoring with simpler code,
@@ -43,8 +57,8 @@ typedef struct {
 } null_svc_t;
 
 typedef struct {
+    unsigned idx;
     null_svc_t* svc;
-    mon_smgr_t* smgr;
     ev_timer* interval_watcher;
 } null_mon_t;
 
@@ -57,20 +71,22 @@ static void null_interval_cb(struct ev_loop* loop V_UNUSED, struct ev_timer* t, 
     dmn_assert(loop); dmn_assert(t);
     dmn_assert(revents == EV_TIMER);
 
-    null_mon_t* mon = (null_mon_t*)t->data;
+    null_mon_t* mon = t->data;
     dmn_assert(mon);
-    gdnsd_mon_state_updater(mon->smgr, false);
+    gdnsd_mon_state_updater(mon->idx, false);
 }
 
-void plugin_null_add_svctype(const char* name, const vscf_data_t* svc_cfg V_UNUSED, const unsigned interval, const unsigned timeout V_UNUSED) {
-    dmn_assert(name);
-    null_svcs = realloc(null_svcs, sizeof(null_svc_t*) * ++num_svcs);
-    null_svc_t* this_svc = null_svcs[num_svcs - 1] = malloc(sizeof(null_svc_t));
+void plugin_null_add_svctype(const char* name, vscf_data_t* svc_cfg V_UNUSED, const unsigned interval, const unsigned timeout V_UNUSED) {
+    dmn_assert(name); dmn_assert(svc_cfg);
+    null_svcs = xrealloc(null_svcs, sizeof(null_svc_t*) * ++num_svcs);
+    null_svc_t* this_svc = null_svcs[num_svcs - 1] = xmalloc(sizeof(null_svc_t));
     this_svc->name = strdup(name);
     this_svc->interval = interval;
 }
 
-void plugin_null_add_monitor(const char* svc_name, mon_smgr_t* smgr) {
+static void add_mon_any(const char* svc_name, const unsigned idx) {
+    dmn_assert(svc_name);
+
     null_svc_t* this_svc = NULL;
 
     for(unsigned i = 0; i < num_svcs; i++) {
@@ -81,19 +97,29 @@ void plugin_null_add_monitor(const char* svc_name, mon_smgr_t* smgr) {
     }
 
     dmn_assert(this_svc);
-    null_mons = realloc(null_mons, sizeof(null_mon_t*) * ++num_mons);
-    null_mon_t* this_mon = null_mons[num_mons - 1] = malloc(sizeof(null_mon_t));
+    null_mons = xrealloc(null_mons, sizeof(null_mon_t*) * ++num_mons);
+    null_mon_t* this_mon = null_mons[num_mons - 1] = xmalloc(sizeof(null_mon_t));
     this_mon->svc = this_svc;
-    this_mon->smgr = smgr;
-    this_mon->interval_watcher = malloc(sizeof(ev_timer));
+    this_mon->idx = idx;
+    this_mon->interval_watcher = xmalloc(sizeof(ev_timer));
     ev_timer_init(this_mon->interval_watcher, &null_interval_cb, 0, 0);
     this_mon->interval_watcher->data = this_mon;
+}
+
+void plugin_null_add_mon_addr(const char* desc V_UNUSED, const char* svc_name, const char* cname V_UNUSED, const dmn_anysin_t* addr V_UNUSED, const unsigned idx) {
+    dmn_assert(desc); dmn_assert(svc_name); dmn_assert(cname); dmn_assert(addr);
+    add_mon_any(svc_name, idx);
+}
+
+void plugin_null_add_mon_cname(const char* desc V_UNUSED, const char* svc_name, const char* cname V_UNUSED, const unsigned idx) {
+    dmn_assert(desc); dmn_assert(svc_name); dmn_assert(cname);
+    add_mon_any(svc_name, idx);
 }
 
 void plugin_null_init_monitors(struct ev_loop* mon_loop) {
     dmn_assert(mon_loop);
 
-    for(unsigned int i = 0; i < num_mons; i++) {
+    for(unsigned i = 0; i < num_mons; i++) {
         ev_timer* ival_watcher = null_mons[i]->interval_watcher;
         ev_timer_set(ival_watcher, 0, 0);
         ev_timer_start(mon_loop, ival_watcher);
@@ -103,7 +129,7 @@ void plugin_null_init_monitors(struct ev_loop* mon_loop) {
 void plugin_null_start_monitors(struct ev_loop* mon_loop) {
     dmn_assert(mon_loop);
 
-    for(unsigned int i = 0; i < num_mons; i++) {
+    for(unsigned i = 0; i < num_mons; i++) {
         null_mon_t* mon = null_mons[i];
         const unsigned ival = mon->svc->interval;
         const double stagger = (((double)i) / ((double)num_mons)) * ((double)ival);
@@ -112,4 +138,3 @@ void plugin_null_start_monitors(struct ev_loop* mon_loop) {
         ev_timer_start(mon_loop, ival_watcher);
     }
 }
-

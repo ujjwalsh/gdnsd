@@ -26,11 +26,13 @@
 #include <sys/uio.h>
 
 #include "conf.h"
+#include "socks.h"
 #include "dnsio_udp.h"
 #include "dnsio_tcp.h"
 #include "dnspacket.h"
-#include "monio.h"
-#include "gdnsd/log.h"
+#include <gdnsd/alloc.h>
+#include <gdnsd/log.h>
+#include <gdnsd/mon-priv.h>
 
 // Macro to add an offset to a void* portably...
 #define ADDVOID(_vstar,_offs) ((void*)(((char*)(_vstar)) + _offs))
@@ -64,7 +66,7 @@ typedef enum {
 } http_state_t;
 
 typedef struct {
-    anysin_t* asin;
+    dmn_anysin_t* asin;
     char read_buffer[9];
     struct iovec outbufs[2];
     char* hdr_buf;
@@ -165,8 +167,8 @@ static const char html_fixed[] =
     "th,td { border-width: 2px; border-style: inset }\r\n"
     "th { background: #CCF; font-weight: bold }\r\n"
     "td.UP { background: #AFA }\r\n"
-    "td.DANGER { background: #FC9 }\r\n"
     "td.DOWN { background: #FAA }\r\n"
+    "td.FORCE { background: #FA0 }\r\n"
     "</style></head><body>\r\n"
     "<h2>" PACKAGE_NAME "/" PACKAGE_VERSION "</h2>\r\n"
     "<p class='big'><span class='bold'>Current Time:</span> %s UTC</p>\r\n"
@@ -193,6 +195,7 @@ static ev_timer* log_watcher = NULL;
 static ev_io** accept_watchers;
 static int* lsocks;
 static unsigned num_lsocks;
+static bool* lsocks_bound;
 static unsigned num_conn_watchers = 0;
 static unsigned data_buffer_size = 0;
 static unsigned hdr_buffer_size = 0;
@@ -277,11 +280,7 @@ static const char* fmt_uptime(const time_t now) {
     return ival_buf;
 }
 
-void statio_log_uptime(void) {
-    log_info("Uptime: %s", fmt_uptime(time(NULL)));
-}
-
-void statio_log_stats(void) {
+static void statio_log_stats(void) {
     populate_stats();
     log_info(log_dns, statio.dns_noerror, statio.dns_refused, statio.dns_nxdomain, statio.dns_notimp, statio.dns_badvers, statio.dns_formerr, statio.dns_dropped, statio.dns_v6, statio.dns_edns, statio.dns_edns_clientsub);
     log_info(log_udp, statio.udp_reqs, statio.udp_recvfail, statio.udp_sendfail, statio.udp_tc, statio.udp_edns_big, statio.udp_edns_tc);
@@ -297,7 +296,7 @@ static void statio_fill_outbuf_csv(struct iovec* outbufs) {
 
     outbufs[1].iov_len = snprintf(outbufs[1].iov_base, data_buffer_size, csv_fixed, (uint64_t)pop_statio_time - start_time, statio.dns_noerror, statio.dns_refused, statio.dns_nxdomain, statio.dns_notimp, statio.dns_badvers, statio.dns_formerr, statio.dns_dropped, statio.dns_v6, statio.dns_edns, statio.dns_edns_clientsub, statio.udp_reqs, statio.udp_recvfail, statio.udp_sendfail, statio.udp_tc, statio.udp_edns_big, statio.udp_edns_tc, statio.tcp_reqs, statio.tcp_recvfail, statio.tcp_sendfail);
 
-    outbufs[1].iov_len += monio_stats_out_csv(ADDVOID(outbufs[1].iov_base, outbufs[1].iov_len));
+    outbufs[1].iov_len += gdnsd_mon_stats_out_csv(ADDVOID(outbufs[1].iov_base, outbufs[1].iov_len));
     outbufs[0].iov_len = snprintf(outbufs[0].iov_base, hdr_buffer_size, http_headers, "text/plain", (unsigned)outbufs[1].iov_len);
 }
 
@@ -310,7 +309,7 @@ static void statio_fill_outbuf_json(struct iovec* outbufs) {
 
     outbufs[1].iov_len = snprintf(outbufs[1].iov_base, data_buffer_size, json_fixed, (uint64_t)pop_statio_time - start_time, statio.dns_noerror, statio.dns_refused, statio.dns_nxdomain, statio.dns_notimp, statio.dns_badvers, statio.dns_formerr, statio.dns_dropped, statio.dns_v6, statio.dns_edns, statio.dns_edns_clientsub, statio.udp_reqs, statio.udp_recvfail, statio.udp_sendfail, statio.udp_tc, statio.udp_edns_big, statio.udp_edns_tc, statio.tcp_reqs, statio.tcp_recvfail, statio.tcp_sendfail);
 
-    outbufs[1].iov_len += monio_stats_out_json(ADDVOID(outbufs[1].iov_base, outbufs[1].iov_len));
+    outbufs[1].iov_len += gdnsd_mon_stats_out_json(ADDVOID(outbufs[1].iov_base, outbufs[1].iov_len));
     memcpy(ADDVOID(outbufs[1].iov_base, outbufs[1].iov_len), json_footer, (sizeof(json_footer)) - 1);
     outbufs[1].iov_len += (sizeof(json_footer)-1);
     outbufs[0].iov_len = snprintf(outbufs[0].iov_base, hdr_buffer_size, http_headers, "application/json", (unsigned)outbufs[1].iov_len);
@@ -325,13 +324,13 @@ static void statio_fill_outbuf_html(struct iovec* outbufs) {
     if(!gmtime_r(&pop_statio_time, &now_tm))
         log_fatal("gmtime_r() failed");
 
-    char now_char[26];
-    if(!asctime_r(&now_tm, now_char))
-        log_fatal("asctime_r() failed");
+    char now_char[64];
+    if(!strftime(now_char, 63, "%a %b %e %T %Y", &now_tm))
+        log_fatal("strftime() failed");
 
     outbufs[1].iov_len = snprintf(outbufs[1].iov_base, data_buffer_size, html_fixed, now_char, fmt_uptime(pop_statio_time), statio.dns_noerror, statio.dns_refused, statio.dns_nxdomain, statio.dns_notimp, statio.dns_badvers, statio.dns_formerr, statio.dns_dropped, statio.dns_v6, statio.dns_edns, statio.dns_edns_clientsub, statio.udp_reqs, statio.udp_recvfail, statio.udp_sendfail, statio.udp_tc, statio.udp_edns_big, statio.udp_edns_tc, statio.tcp_reqs, statio.tcp_recvfail, statio.tcp_sendfail);
 
-    outbufs[1].iov_len += monio_stats_out_html(ADDVOID(outbufs[1].iov_base, outbufs[1].iov_len));
+    outbufs[1].iov_len += gdnsd_mon_stats_out_html(ADDVOID(outbufs[1].iov_base, outbufs[1].iov_len));
     memcpy(ADDVOID(outbufs[1].iov_base, outbufs[1].iov_len), html_footer, (sizeof(html_footer)) - 1);
     outbufs[1].iov_len += (sizeof(html_footer)-1);
     outbufs[0].iov_len = snprintf(outbufs[0].iov_base, hdr_buffer_size, http_headers, "application/xhtml+xml", (unsigned)outbufs[1].iov_len);
@@ -396,14 +395,14 @@ static void timeout_cb(struct ev_loop* loop V_UNUSED, ev_timer* t, const int rev
     dmn_assert(loop); dmn_assert(t);
     dmn_assert(revents == EV_TIMER);
 
-    http_data_t* tdata = (http_data_t*)t->data;
+    http_data_t* tdata = t->data;
     log_debug("HTTP connection timed out while %s %s",
         tdata->state == READING_REQ
             ? "reading from"
             : tdata->state == WRITING_RES
                 ? "writing to"
                 : "lingering with",
-        logf_anysin(tdata->asin));
+        dmn_logf_anysin(tdata->asin));
 
     cleanup_conn_watchers(loop, tdata);
 }
@@ -413,7 +412,7 @@ static void write_cb(struct ev_loop* loop, ev_io* io, const int revents V_UNUSED
     dmn_assert(loop); dmn_assert(io);
     dmn_assert(revents == EV_WRITE);
 
-    http_data_t* tdata = (http_data_t*)io->data;
+    http_data_t* tdata = io->data;
     struct iovec* iovs = tdata->outbufs;
 
     struct iovec* iovs_writev;
@@ -429,8 +428,8 @@ static void write_cb(struct ev_loop* loop, ev_io* io, const int revents V_UNUSED
     const ssize_t write_rv = writev(io->fd, iovs_writev, iovcnt_writev);
 
     if(unlikely(write_rv < 0)) {
-        if(errno != EAGAIN && errno != EINTR) {
-            log_debug("HTTP send() failed (%s), dropping response to %s", logf_errno(), logf_anysin(tdata->asin));
+        if(errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+            log_debug("HTTP send() failed (%s), dropping response to %s", dmn_logf_errno(), dmn_logf_anysin(tdata->asin));
             cleanup_conn_watchers(loop, tdata);
         }
         return;
@@ -467,7 +466,7 @@ F_NONNULL
 static void read_cb(struct ev_loop* loop, ev_io* io, const int revents V_UNUSED) {
     dmn_assert(loop); dmn_assert(io);
     dmn_assert(revents == EV_READ);
-    http_data_t* tdata = (http_data_t*)io->data;
+    http_data_t* tdata = io->data;
 
     dmn_assert(tdata);
     dmn_assert(tdata->state != WRITING_RES);
@@ -475,8 +474,9 @@ static void read_cb(struct ev_loop* loop, ev_io* io, const int revents V_UNUSED)
     if(tdata->state == READING_JUNK) {
         ssize_t recvlen = recv(io->fd, junk_buffer, JUNK_SIZE, 0);
         if(unlikely(recvlen == -1)) {
-            if(errno == EAGAIN || errno == EINTR) return;
-            log_debug("HTTP recv() error (lingering) from %s: %s", logf_anysin(tdata->asin), logf_errno());
+            if(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+                return;
+            log_debug("HTTP recv() error (lingering) from %s: %s", dmn_logf_anysin(tdata->asin), dmn_logf_errno());
         }
         if(recvlen < 1) cleanup_conn_watchers(loop, tdata);
         return;
@@ -488,8 +488,8 @@ static void read_cb(struct ev_loop* loop, ev_io* io, const int revents V_UNUSED)
     const size_t wanted = 9 - tdata->read_done;
     ssize_t recvlen = recv(io->fd, destination, wanted, 0);
     if(unlikely(recvlen == -1)) {
-        if(errno != EAGAIN && errno != EINTR) {
-            log_debug("HTTP recv() error from %s: %s", logf_anysin(tdata->asin), logf_errno());
+        if(errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+            log_debug("HTTP recv() error from %s: %s", dmn_logf_anysin(tdata->asin), dmn_logf_errno());
             cleanup_conn_watchers(loop, tdata);
         }
         return;
@@ -512,8 +512,8 @@ static void accept_cb(struct ev_loop* loop, ev_io* io, int revents V_UNUSED) {
     dmn_assert(loop); dmn_assert(io);
     dmn_assert(revents == EV_READ);
 
-    anysin_t* asin = malloc(sizeof(anysin_t));
-    asin->len = ANYSIN_MAXLEN;
+    dmn_anysin_t* asin = xmalloc(sizeof(dmn_anysin_t));
+    asin->len = DMN_ANYSIN_MAXLEN;
 
     const int sock = accept(io->fd, &asin->sa, &asin->len);
 
@@ -521,46 +521,51 @@ static void accept_cb(struct ev_loop* loop, ev_io* io, int revents V_UNUSED) {
         free(asin);
         switch(errno) {
             case EAGAIN:
+#if EWOULDBLOCK != EAGAIN
+            case EWOULDBLOCK:
+#endif
             case EINTR:
                 break;
 #ifdef ENONET
             case ENONET:
 #endif
             case ENETDOWN:
-            case EPROTO:
-            case EHOSTDOWN:
+#ifdef EPROTO
+	    case EPROTO:
+#endif
+	    case EHOSTDOWN:
             case EHOSTUNREACH:
             case ENETUNREACH:
-                log_debug("HTTP: early tcp socket death: %s", logf_errno());
+                log_debug("HTTP: early tcp socket death: %s", dmn_logf_errno());
                 break;
             default:
-                log_err("HTTP: accept() error: %s", logf_errno());
+                log_err("HTTP: accept() error: %s", dmn_logf_errno());
         }
         return;
     }
 
-    log_debug("HTTP: Received connection from %s", logf_anysin(asin));
+    log_debug("HTTP: Received connection from %s", dmn_logf_anysin(asin));
 
     if(unlikely(fcntl(sock, F_SETFL, (fcntl(sock, F_GETFL, 0)) | O_NONBLOCK) == -1)) {
         free(asin);
         close(sock);
-        log_err("Failed to set O_NONBLOCK on inbound HTTP socket: %s", logf_errno());
+        log_err("Failed to set O_NONBLOCK on inbound HTTP socket: %s", dmn_logf_errno());
         return;
     }
 
-    ev_io* read_watcher = malloc(sizeof(ev_io));
-    ev_io* write_watcher = malloc(sizeof(ev_io));
-    ev_timer* timeout_watcher = malloc(sizeof(ev_timer));
+    ev_io* read_watcher = xmalloc(sizeof(ev_io));
+    ev_io* write_watcher = xmalloc(sizeof(ev_io));
+    ev_timer* timeout_watcher = xmalloc(sizeof(ev_timer));
 
-    http_data_t* tdata = calloc(1, sizeof(http_data_t));
+    http_data_t* tdata = xcalloc(1, sizeof(http_data_t));
     tdata->state = READING_REQ;
     tdata->asin = asin;
     tdata->read_watcher = read_watcher;
     tdata->write_watcher = write_watcher;
     tdata->timeout_watcher = timeout_watcher;
 
-    tdata->hdr_buf = tdata->outbufs[0].iov_base = malloc(hdr_buffer_size);
-    tdata->data_buf = tdata->outbufs[1].iov_base = malloc(data_buffer_size);
+    tdata->hdr_buf = tdata->outbufs[0].iov_base = xmalloc(hdr_buffer_size);
+    tdata->data_buf = tdata->outbufs[1].iov_base = xmalloc(data_buffer_size);
 
     read_watcher->data = tdata;
     write_watcher->data = tdata;
@@ -595,7 +600,7 @@ void statio_init(void) {
     start_time = time(NULL);
 
     // the junk buffer
-    junk_buffer = malloc(JUNK_SIZE);
+    junk_buffer = xmalloc(JUNK_SIZE);
 
     // The largest our output sizes can possibly be:
     hdr_buffer_size =
@@ -614,10 +619,10 @@ void statio_init(void) {
 
     data_buffer_size =
         fixed                                 // html_fixed format string
-        + (25 - 2)                            // max asctime output - 2 for the original %s
+        + (63 - 2)                            // max strftime output - 2 for the original %s
         + (IVAL_BUFSZ - 2)                    // max fmt_uptime output, again - 2 for %s
         + (19 * (stat_len - strlen(PRIuPTR))) // 19 stats, up to 20 bytes long each
-        + monio_get_max_stats_len()           // whatever monio tells us...
+        + gdnsd_mon_stats_get_max_len()       // whatever mon.c tells us...
         + (sizeof(html_footer) - 1);          // html_footer fixed string
 
     // double it, because it's not that big and this gives us a lot of headroom for
@@ -626,26 +631,37 @@ void statio_init(void) {
 
     // now set up the normal stuff, like libev event watchers
     if(gconfig.log_stats) {
-        log_watcher = malloc(sizeof(ev_timer));
+        log_watcher = xmalloc(sizeof(ev_timer));
         ev_timer_init(log_watcher, log_watcher_cb, gconfig.log_stats, gconfig.log_stats);
         ev_set_priority(log_watcher, -2);
     }
 
     num_lsocks = gconfig.num_http_addrs;
-    lsocks = malloc(sizeof(int) * num_lsocks);
-    accept_watchers = malloc(sizeof(ev_io*) * num_lsocks);
+    lsocks = xmalloc(sizeof(int) * num_lsocks);
+    lsocks_bound = xcalloc(num_lsocks, sizeof(bool));
+    accept_watchers = xmalloc(sizeof(ev_io*) * num_lsocks);
 
     for(unsigned i = 0; i < num_lsocks; i++) {
-        const anysin_t* asin = &gconfig.http_addrs[i];
-        lsocks[i] = tcp_listen_pre_setup(asin, gconfig.http_timeout, false);
-        if(bind(lsocks[i], &asin->sa, asin->len))
-            log_fatal("Failed to bind() stats TCP socket to %s: %s", logf_anysin(asin), logf_errno());
-        if(listen(lsocks[i], 128) == -1)
-            log_fatal("Failed to listen(s, %i) on stats TCP socket %s: %s", 128, logf_anysin(asin), logf_errno());
-        accept_watchers[i] = malloc(sizeof(ev_io));
-        ev_io_init(accept_watchers[i], accept_cb, lsocks[i], EV_READ);
-        ev_set_priority(accept_watchers[i], -2);
+        const dmn_anysin_t* asin = &gconfig.http_addrs[i];
+        lsocks[i] = tcp_listen_pre_setup(asin, gconfig.http_timeout);
     }
+}
+
+void statio_bind_socks(void) {
+    for(unsigned i = 0; i < num_lsocks; i++)
+        if(!lsocks_bound[i])
+            if(!socks_helper_bind("TCP stats", lsocks[i], &gconfig.http_addrs[i], false))
+                lsocks_bound[i] = true;
+}
+
+bool statio_check_socks(bool soft) {
+    unsigned rv = true;
+    for(unsigned i = 0; i < num_lsocks; i++)
+        if(!socks_sock_is_bound_to(lsocks[i], &gconfig.http_addrs[i]) && !soft)
+            log_fatal("Failed to bind() stats TCP socket to %s", dmn_logf_anysin(&gconfig.http_addrs[i]));
+        else
+            rv = false;
+    return rv;
 }
 
 void statio_start(struct ev_loop* statio_loop) {
@@ -654,7 +670,13 @@ void statio_start(struct ev_loop* statio_loop) {
     if(log_watcher)
         ev_timer_start(statio_loop, log_watcher);
 
-    for(unsigned i = 0; i < num_lsocks; i++)
+    for(unsigned i = 0; i < num_lsocks; i++) {
+        if(listen(lsocks[i], 128) == -1)
+            log_fatal("Failed to listen(s, %i) on stats TCP socket %s: %s", 128, dmn_logf_anysin(&gconfig.http_addrs[i]), dmn_logf_errno());
+        accept_watchers[i] = xmalloc(sizeof(ev_io));
+        ev_io_init(accept_watchers[i], accept_cb, lsocks[i], EV_READ);
+        ev_set_priority(accept_watchers[i], -2);
         ev_io_start(statio_loop, accept_watchers[i]);
+    }
 }
 

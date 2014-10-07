@@ -22,10 +22,14 @@
 
 #include "config.h"
 #include "ztree.h"
+#include <ev.h>
+#include <stdbool.h>
 
-void zsrc_djb_load_zones(void);
+void zsrc_djb_load_zones(const bool check_only);
 
 F_NONNULL
 void zsrc_djb_runtime_init(struct ev_loop* loop);
+
+void zsrc_djb_sigusr1(void);
 
 #endif // GDNSD_ZSRC_DJB_H

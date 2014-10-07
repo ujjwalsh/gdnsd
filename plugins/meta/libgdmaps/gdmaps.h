@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,7 +28,7 @@
 typedef struct _gdmaps_t gdmaps_t;
 
 F_NONNULL
-gdmaps_t* gdmaps_new(const vscf_data_t* maps_cfg);
+gdmaps_t* gdmaps_new(vscf_data_t* maps_cfg);
 F_NONNULL
 void gdmaps_load_databases(gdmaps_t* gdmaps);
 F_NONNULL F_PURE
@@ -41,13 +41,13 @@ F_NONNULL F_PURE
 unsigned gdmaps_dcname2num(const gdmaps_t* gdmaps, const unsigned gdmap_idx, const char* dcname);
 F_NONNULL F_PURE
 const char* gdmaps_dcnum2name(const gdmaps_t* gdmaps, const unsigned gdmap_idx, const unsigned dcnum);
+F_NONNULL F_PURE
+unsigned gdmaps_map_mon_idx(const gdmaps_t* gdmaps, const unsigned gdmap_idx, const unsigned dcnum);
 F_NONNULL
 const char* gdmaps_logf_dclist(const gdmaps_t* gdmaps, const unsigned gdmap_idx, const uint8_t* dclist);
 F_NONNULL
 const uint8_t* gdmaps_lookup(const gdmaps_t* gdmaps, const unsigned gdmap_idx, const client_info_t* client, unsigned* scope_mask);
 F_NONNULL
 void gdmaps_setup_watchers(gdmaps_t* gdmaps);
-F_NONNULL
-void gdmaps_destroy(gdmaps_t* gdmaps);
 
 #endif // GDMAPS_H

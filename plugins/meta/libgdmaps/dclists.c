@@ -1,6 +1,6 @@
 /* Copyright © 2012 Brandon L Black <blblack@gmail.com>
  *
- * This file is part of gdnsd-plugin-geoip.
+ * This file is part of gdnsd.
  *
  * gdnsd-plugin-geoip is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,6 +24,7 @@
 
 #include <math.h>
 
+#include <gdnsd/alloc.h>
 #include <gdnsd/log.h>
 #include <gdnsd/vscf.h>
 
@@ -68,15 +69,15 @@ struct _dclists {
 
 dclists_t* dclists_new(const dcinfo_t* info) {
     const unsigned num_dcs = dcinfo_get_count(info);
-    uint8_t* deflist = malloc(num_dcs + 1);
+    uint8_t* deflist = xmalloc(num_dcs + 1);
     for(unsigned i = 0; i < num_dcs; i++)
         deflist[i] = i + 1;
     deflist[num_dcs] = 0;
 
-    dclists_t* newdcl = malloc(sizeof(dclists_t));
+    dclists_t* newdcl = xmalloc(sizeof(dclists_t));
     newdcl->count = 1;
     newdcl->old_count = 0;
-    newdcl->list = malloc(sizeof(uint8_t*));
+    newdcl->list = xmalloc(sizeof(uint8_t*));
     newdcl->list[0] = deflist;
     newdcl->info = info;
 
@@ -84,11 +85,11 @@ dclists_t* dclists_new(const dcinfo_t* info) {
 }
 
 dclists_t* dclists_clone(const dclists_t* old) {
-    dclists_t* dcl_clone = malloc(sizeof(dclists_t));
+    dclists_t* dcl_clone = xmalloc(sizeof(dclists_t));
     dcl_clone->info = old->info;
     dcl_clone->count = old->count;
     dcl_clone->old_count = old->count;
-    dcl_clone->list = malloc(dcl_clone->count * sizeof(uint8_t*));
+    dcl_clone->list = xmalloc(dcl_clone->count * sizeof(uint8_t*));
     memcpy(dcl_clone->list, old->list, dcl_clone->count * sizeof(uint8_t*));
     return dcl_clone;
 }
@@ -127,7 +128,7 @@ static unsigned dclists_find_or_add_raw(dclists_t* lists, const uint8_t* newlist
         log_fatal("plugin_geoip: map '%s': too many unique dclists (>%u)", map_name, lists->count);
 
     const unsigned newidx = lists->count;
-    lists->list = realloc(lists->list, (++lists->count) * sizeof(uint8_t*));
+    lists->list = xrealloc(lists->list, (++lists->count) * sizeof(uint8_t*));
     lists->list[newidx] = (uint8_t*)strdup((const char*)newlist);
     return newidx;
 }
@@ -141,13 +142,13 @@ void dclists_replace_list0(dclists_t* lists, uint8_t* newlist) {
 
 // We should probably check for dupes in these map dclists, but really the fallout
 //  is just some redundant lookup work if the user screws that up.
-int dclists_xlate_vscf(dclists_t* lists, const vscf_data_t* vscf_list, const char* map_name, uint8_t* newlist, const bool allow_auto) {
+int dclists_xlate_vscf(dclists_t* lists, vscf_data_t* vscf_list, const char* map_name, uint8_t* newlist, const bool allow_auto) {
     dmn_assert(lists); dmn_assert(vscf_list); dmn_assert(lists); dmn_assert(newlist); dmn_assert(map_name);
 
     const unsigned count = vscf_array_get_len(vscf_list);
 
     for(unsigned i = 0; i < count; i++) {
-        const vscf_data_t* dcname_cfg = vscf_array_get_data(vscf_list, i);
+        vscf_data_t* dcname_cfg = vscf_array_get_data(vscf_list, i);
         if(!dcname_cfg || !vscf_is_simple(dcname_cfg))
             log_fatal("plugin_geoip: map '%s': datacenter lists must be an array of one or more datacenter name strings", map_name);
         const char* dcname = vscf_simple_get_data(dcname_cfg);
@@ -163,7 +164,7 @@ int dclists_xlate_vscf(dclists_t* lists, const vscf_data_t* vscf_list, const cha
     return 0;
 }
 
-int dclists_find_or_add_vscf(dclists_t* lists, const vscf_data_t* vscf_list, const char* map_name, const bool allow_auto) {
+int dclists_find_or_add_vscf(dclists_t* lists, vscf_data_t* vscf_list, const char* map_name, const bool allow_auto) {
     dmn_assert(lists); dmn_assert(vscf_list); dmn_assert(lists); dmn_assert(map_name);
     uint8_t newlist[256];
     int status = dclists_xlate_vscf(lists,vscf_list,map_name,newlist,allow_auto);

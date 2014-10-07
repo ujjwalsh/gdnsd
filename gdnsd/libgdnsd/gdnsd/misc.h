@@ -23,6 +23,26 @@
 #include <gdnsd/compiler.h>
 #include <inttypes.h>
 #include <stdbool.h>
+#include <pthread.h>
+#include <dirent.h>
+
+extern const char gdnsd_lcmap[256];
+
+// downcase an array of bytes of known length
+F_NONNULL
+static inline void gdnsd_downcase_bytes(char* bytes, unsigned len) {
+    for(unsigned i = 0; i < len; i++)
+        bytes[i] = gdnsd_lcmap[(uint8_t)bytes[i]];
+}
+
+// downcase an asciiz string
+F_NONNULL
+static inline void gdnsd_downcase_str(char* str) {
+    while(*str) {
+        *str = gdnsd_lcmap[(uint8_t)*str];
+        str++;
+    }
+}
 
 // allocate a new string, concatenating s1 + s2.
 // retval is the new string
@@ -30,6 +50,14 @@
 //   to the offset of the copy of s2 within the retval.
 F_MALLOC F_NONNULLX(1,2) F_WUNUSED
 char* gdnsd_str_combine(const char* s1, const char* s2, const char** s2_offs);
+
+// allocate a new string and concatenate all "count" strings
+//   from the args list into it.
+F_MALLOC F_NONNULL F_WUNUSED
+char* gdnsd_str_combine_n(const unsigned count, ...);
+
+// set thread name (via pthread_setname_np or similar)
+void gdnsd_thread_setname(const char* n);
 
 // PRNG:
 // gdnsd_rand_init() allocates an opaque PRNG state which can
@@ -66,5 +94,10 @@ bool gdnsd_linux_min_version(const unsigned x, const unsigned y, const unsigned 
 
 // Jenkins lookup2
 uint32_t gdnsd_lookup2(const char *k, uint32_t len);
+
+// Get system/filesystem-specific dirent buffer size for readdir_r() safely
+//   (dirname is just for error output)
+F_NONNULL
+size_t gdnsd_dirent_bufsize(DIR* d V_UNUSED, const char* dirname);
 
 #endif // GDNSD_MISC_H
