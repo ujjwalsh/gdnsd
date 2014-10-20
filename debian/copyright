@@ -1,6 +1,6 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: gdnsd
-Source: https://github.com/blblack/gdnsd
+Source: https://github.com/gdnsd/gdnsd
 
 License: GPL-3+
  gdnsd is free software: you can redistribute it and/or modify it under the
