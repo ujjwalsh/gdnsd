@@ -21,7 +21,7 @@ test -x $DAEMON || exit 0
 
 [ -f /etc/default/$NAME ] && . /etc/default/$NAME
 
-GDNSD_CMD="$DAEMON $GDNSD_CHROOT"
+GDNSD_CMD="$DAEMON $GDNSD_CFGDIR"
 
 gdnsd_cmd() {
     $GDNSD_CMD "$1" >/dev/null 2>/dev/null

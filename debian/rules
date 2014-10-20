@@ -10,10 +10,13 @@ ifneq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
 endif
 
 %:
-	dh $@  --with autoreconf
+	dh $@  --with autoreconf,systemd
 
 override_dh_auto_configure:
-	dh_auto_configure -- --disable-silent-rules $(DEBUG)
+	dh_auto_configure -- \
+		--disable-silent-rules \
+		--with-systemdsystemunitdir=/lib/systemd/system \
+		$(DEBUG)
 
 override_dh_strip:
 	dh_strip --dbg-package=gdnsd-dbg
