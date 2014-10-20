@@ -69,17 +69,11 @@ static void udp_sock_opts_v4(const int sock V_UNUSED, const bool any_addr) {
     const int mtu_type = IP_PMTUDISC_DONT;
     if(setsockopt(sock, SOL_IP, IP_MTU_DISCOVER, &mtu_type, sizeof (mtu_type)) == -1)
         log_fatal("Failed to disable Path MTU Discovery for UDP socket: %s", dmn_logf_errno());
-#elif defined IP_DONTFRAG
+#endif
+#if defined IP_DONTFRAG
     const int opt_zero = 0;
     if(setsockopt(sock, SOL_IP, IP_DONTFRAG, &opt_zero, sizeof (opt_zero)) == -1)
         log_fatal("Failed to disable DF bit for UDP socket: %s", dmn_logf_errno());
-#endif
-
-    // This is just a latency hack, it's not necessary for correct operation
-#if defined IP_TOS && defined IPTOS_LOWDELAY
-    const int opt_tos = IPTOS_LOWDELAY;
-    if(setsockopt(sock, SOL_IP, IP_TOS, &opt_tos, sizeof opt_tos) == -1)
-        log_warn("Failed to set IPTOS_LOWDELAY on UDP socket: %s", dmn_logf_errno());
 #endif
 
     if(any_addr) {
@@ -99,6 +93,14 @@ static void udp_sock_opts_v4(const int sock V_UNUSED, const bool any_addr) {
         log_fatal("IPv4 any-address '0.0.0.0' not supported for DNS listening on your platform (no IP_PKTINFO or IP_RECVDSTADDR+IP_SENDSRCADDR)");
 #endif
     }
+
+    // This is just a latency hack, it's not necessary for correct operation
+#if defined IP_TOS && defined IPTOS_LOWDELAY
+    const int opt_tos = IPTOS_LOWDELAY;
+    if(setsockopt(sock, SOL_IP, IP_TOS, &opt_tos, sizeof opt_tos) == -1)
+        log_warn("Failed to set IPTOS_LOWDELAY on UDP socket: %s", dmn_logf_errno());
+#endif
+
 }
 
 /* Here, we assume that if neither IPV6_USE_MIN_MTU or IPV6_MTU is
@@ -132,14 +134,32 @@ static void udp_sock_opts_v6(const int sock) {
     if(setsockopt(sock, SOL_IPV6, IPV6_V6ONLY, &opt_one, sizeof opt_one) == -1)
         log_fatal("Failed to set IPV6_V6ONLY on UDP socket: %s", dmn_logf_errno());
 
+#if defined IPV6_MTU_DISCOVER && defined IPV6_PMTUDISC_DONT
+    const int mtu_type = IPV6_PMTUDISC_DONT;
+    if(setsockopt(sock, SOL_IPV6, IPV6_MTU_DISCOVER, &mtu_type, sizeof (mtu_type)) == -1)
+        log_fatal("Failed to disable Path MTU Discovery for UDP socket: %s", dmn_logf_errno());
+#endif
+#if defined IPV6_DONTFRAG
+    const int opt_zero = 0;
+    if(setsockopt(sock, SOL_IPV6, IPV6_DONTFRAG, &opt_zero, sizeof (opt_zero)) == -1)
+        log_fatal("Failed to disable DF bit for UDP socket: %s", dmn_logf_errno());
+#endif
+
+#if defined IPV6_RECVPKTINFO
+    if(setsockopt(sock, SOL_IPV6, IPV6_RECVPKTINFO, &opt_one, sizeof opt_one) == -1)
+        log_fatal("Failed to set IPV6_RECVPKTINFO on UDP socket: %s", dmn_logf_errno());
+#elif defined IPV6_PKTINFO
+    if(setsockopt(sock, SOL_IPV6, IPV6_PKTINFO, &opt_one, sizeof opt_one) == -1)
+        log_fatal("Failed to set IPV6_PKTINFO on UDP socket: %s", dmn_logf_errno());
+#else
+#   error IPV6_RECVPKTINFO or IPV6_PKTINFO required; this host lacks both
+#endif
+
 #if defined IPV6_TCLASS && defined IPTOS_LOWDELAY
     const int opt_tos = IPTOS_LOWDELAY;
     if(setsockopt(sock, SOL_IPV6, IPV6_TCLASS, &opt_tos, sizeof opt_tos) == -1)
         log_fatal("Failed to set IPTOS_LOWDELAY on UDP socket: %s", dmn_logf_errno());
 #endif
-
-    if(setsockopt(sock, SOL_IPV6, IPV6_RECVPKTINFO, &opt_one, sizeof opt_one) == -1)
-        log_fatal("Failed to set IPV6_RECVPKTINFO on UDP socket: %s", dmn_logf_errno());
 }
 
 F_NONNULL
@@ -251,8 +271,8 @@ void udp_sock_setup(dns_thread_t* t) {
 // A reasonable guess for v4/v6 dstaddr pktinfo + cmsg header?
 #define CMSG_BUFSIZE 256
 
-F_NORETURN F_NONNULL
-static void mainloop(const int fd, dnspacket_stats_t* stats, const bool use_cmsg) {
+F_HOT F_NORETURN F_NONNULL
+static void mainloop(const int fd, void* dnsp_ctx, dnspacket_stats_t* stats, const bool use_cmsg) {
     dmn_assert(stats);
 
     const int cmsg_size = use_cmsg ? CMSG_BUFSIZE : 1;
@@ -321,7 +341,7 @@ static void mainloop(const int fd, dnspacket_stats_t* stats, const bool use_cmsg
         }
         else {
             asin.len = msg_hdr.msg_namelen;
-            iov.iov_len = process_dns_query(&asin, buf, buf_in_len);
+            iov.iov_len = process_dns_query(dnsp_ctx, stats, &asin, buf, buf_in_len);
             if(likely(iov.iov_len)) {
                 const int sent = sendmsg(fd, &msg_hdr, 0);
                 if(unlikely(sent < 0)) {
@@ -346,8 +366,8 @@ static bool has_mmsg(void) {
     return rv;
 }
 
-F_NORETURN F_NONNULL
-static void mainloop_mmsg(const unsigned width, const int fd, dnspacket_stats_t* stats, const bool use_cmsg) {
+F_HOT F_NORETURN F_NONNULL
+static void mainloop_mmsg(const unsigned width, const int fd, void* dnsp_ctx, dnspacket_stats_t* stats, const bool use_cmsg) {
     dmn_assert(stats);
 
     const int cmsg_size = use_cmsg ? CMSG_BUFSIZE : 1;
@@ -425,7 +445,7 @@ static void mainloop_mmsg(const unsigned width, const int fd, dnspacket_stats_t*
                 }
                 else {
                     asin[i].len = dgrams[i].msg_hdr.msg_namelen;
-                    iov[i][0].iov_len = process_dns_query(&asin[i], buf[i], dgrams[i].msg_len);
+                    iov[i][0].iov_len = process_dns_query(dnsp_ctx, stats, &asin[i], buf[i], dgrams[i].msg_len);
                 }
             }
 
@@ -507,7 +527,8 @@ void* dnsio_udp_start(void* thread_asvoid) {
 
     const dns_addr_t* addrconf = t->ac;
 
-    dnspacket_stats_t* stats = dnspacket_init(t->threadnum, true);
+    dnspacket_stats_t* stats = dnspacket_stats_init(t->threadnum, true);
+    void* dnsp_ctx = dnspacket_ctx_init(true);
 
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
@@ -529,11 +550,11 @@ void* dnsio_udp_start(void* thread_asvoid) {
     if(addrconf->udp_recv_width > 1) {
         log_debug("sendmmsg() with a width of %u enabled for UDP socket %s",
             addrconf->udp_recv_width, dmn_logf_anysin(&addrconf->addr));
-        mainloop_mmsg(addrconf->udp_recv_width, t->sock, stats, need_cmsg);
+        mainloop_mmsg(addrconf->udp_recv_width, t->sock, dnsp_ctx, stats, need_cmsg);
     }
     else
 #endif
     {
-        mainloop(t->sock, stats, need_cmsg);
+        mainloop(t->sock, dnsp_ctx, stats, need_cmsg);
     }
 }

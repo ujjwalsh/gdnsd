@@ -73,7 +73,7 @@ static unsigned map_get_len(const unsigned mapnum) {
     return dclists[mapnum]->num_dcs;
 }
 
-F_NONNULL
+F_NONNULL F_PURE
 static unsigned map_get_dcidx(const unsigned mapnum, const char* dcname) {
     dmn_assert(dcname);
     dmn_assert(mapnum < num_dclists);
@@ -84,21 +84,6 @@ static unsigned map_get_dcidx(const unsigned mapnum, const char* dcname) {
             return i;
 
     return 0;
-}
-
-F_UNUSED
-static void maps_destroy(void) {
-    if(dclists) {
-        for(unsigned i = 0; i < num_dclists; i++) {
-            dclist_t* dcl = dclists[i];
-            for(unsigned j = 1; j <= dcl->num_dcs; j++)
-                free(dcl->dc_names[j]);
-            free(dcl->dc_names);
-            free(dcl->dc_list);
-            free(dcl);
-        }
-        free(dclists);
-    }
 }
 
 F_NONNULL

@@ -19,6 +19,9 @@
 
 #include "main.h"
 
+#include <stdlib.h>
+#include <stdio.h>
+#include <errno.h>
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -47,31 +50,9 @@
 #include <gdnsd/paths-priv.h>
 #include <gdnsd/mon-priv.h>
 
-// ev loop used for monitoring, statio, and watchdog
-// (all of which shared a thread as well)
+// ev loop used for monitoring and statio
+// (which shared a thread as well)
 static struct ev_loop* mon_loop = NULL;
-
-// Watchdog stuff
-static ev_timer* watchdog_timer = NULL;
-
-static void watchdog_cb(struct ev_loop* loop V_UNUSED, ev_timer* w V_UNUSED, int revents V_UNUSED) {
-    dmn_assert(loop == mon_loop);
-    dmn_assert(w == watchdog_timer);
-    dmn_assert(revents == EV_TIMER);
-    dmn_wdog_ping();
-}
-
-static void watchdog_start(struct ev_loop* loop) {
-    dmn_assert(loop == mon_loop);
-    unsigned msec = dmn_wdog_get_msec();
-    if(msec) {
-        double sec_dbl = ((double)msec) / 1000.0;
-        watchdog_timer = xmalloc(sizeof(ev_timer));
-        ev_timer_init(watchdog_timer, watchdog_cb, 0., sec_dbl);
-        ev_timer_start(loop, watchdog_timer);
-        log_info("watchdog starting, will ping every ~ %.3f seconds", sec_dbl);
-    }
-}
 
 // custom atexit-like stuff, only for resource
 //   de-allocation in debug builds to check for leaks
@@ -99,19 +80,20 @@ static void atexit_debug_execute(void) { }
 
 #endif
 
-F_NONNULL
+F_NONNULL F_NORETURN
 static void syserr_for_ev(const char* msg) { dmn_assert(msg); log_fatal("%s: %s", msg, dmn_logf_errno()); }
 
 F_NONNULL F_NORETURN
 static void usage(const char* argv0) {
     fprintf(stderr,
         PACKAGE_NAME " version " PACKAGE_VERSION "\n"
-        "Usage: %s [-fsSD] [-c %s] <action>\n"
+        "Usage: %s [-fsSxD] [-c %s] <action>\n"
         "  -D - Enable verbose debug output\n"
-        "  -f - Foreground mode for start/restart-like actions\n"
+        "  -f - Foreground mode for [re]start actions\n"
         "  -s - Force 'zones_strict_startup = true' for this invocation\n"
         "  -S - Force 'zones_strict_data = true' for this invocation\n"
         "  -c - Configuration directory\n"
+        "  -x - No syslog output (must use -f with this if [re]start)\n"
         "Actions:\n"
         "  checkconf - Checks validity of config and zone files\n"
         "  start - Start " PACKAGE_NAME " as a regular daemon\n"
@@ -135,19 +117,15 @@ static void usage(const char* argv0) {
 #       ifdef USE_INOTIFY
             " inotify"
 #       endif
-#       ifdef USE_SYSTEMD
-            " systemd"
-#       endif
 
 #       if  defined NDEBUG \
         && !defined HAVE_QSBR \
         && !defined USE_SENDMMSG \
-        && !defined USE_INOTIFY \
-        && !defined USE_SYSTEMD
+        && !defined USE_INOTIFY
             " none"
 #       endif
 
-        "\nFor updates, bug reports, etc, please visit " PACKAGE_URL "\n",
+        "\nFor updates, bug reports, etc, please visit " PKG_URL "\n",
         argv0, gdnsd_get_default_config_dir()
     );
     exit(2);
@@ -187,9 +165,12 @@ static void* mon_runtime(void* unused V_UNUSED) {
 static void start_threads(void) {
     // Block all signals using the pthreads interface while starting threads,
     //  which causes them to inherit the same mask.
-    sigset_t sigmask_all, sigmask_prev;
+    sigset_t sigmask_all;
     sigfillset(&sigmask_all);
-    pthread_sigmask(SIG_SETMASK, &sigmask_all, &sigmask_prev);
+    sigset_t sigmask_prev;
+    sigemptyset(&sigmask_prev);
+    if(pthread_sigmask(SIG_SETMASK, &sigmask_all, &sigmask_prev))
+        log_fatal("pthread_sigmask() failed");
 
     // system scope scheduling, joinable threads
     pthread_attr_t attribs;
@@ -228,7 +209,8 @@ static void start_threads(void) {
 
     // Restore the original mask in the main thread, so
     //  we can continue handling signals like normal
-    pthread_sigmask(SIG_SETMASK, &sigmask_prev, NULL);
+    if(pthread_sigmask(SIG_SETMASK, &sigmask_prev, NULL))
+        log_fatal("pthread_sigmask() failed");
     pthread_attr_destroy(&attribs);
 }
 
@@ -335,6 +317,7 @@ typedef struct {
     bool force_zsd;
     bool debug;
     bool foreground;
+    bool use_syslog;
 } cmdline_opts_t;
 
 F_NONNULL
@@ -342,10 +325,13 @@ static action_t parse_args(const int argc, char** argv, cmdline_opts_t* copts) {
     action_t action = ACT_UNDEF;
 
     int optchar;
-    while((optchar = getopt(argc, argv, "c:DfsS"))) {
+    while((optchar = getopt(argc, argv, "c:xDfsS"))) {
         switch(optchar) {
             case 'c':
                 copts->cfg_dir = optarg;
+                break;
+            case 'x':
+                copts->use_syslog = false;
                 break;
             case 'D':
                 copts->debug = true;
@@ -377,7 +363,6 @@ static action_t parse_args(const int argc, char** argv, cmdline_opts_t* copts) {
 }
 
 int main(int argc, char** argv) {
-
     // Parse args, getting the config path
     //   returning the action.  Exits on cmdline errors,
     //   does not use libdmn assert/log stuff.
@@ -387,36 +372,43 @@ int main(int argc, char** argv) {
         .force_zsd = false,
         .debug = false,
         .foreground = false,
+        .use_syslog = true,
     };
     action_t action = parse_args(argc, argv, &copts);
 
     // basic action-based parameters
-    bool will_daemonize;
     conf_mode_t cmode;
     switch(action) {
         case ACT_STATUS: // fall-through
         case ACT_RELOADZ: // fall-through
         case ACT_STOP:
             cmode = CONF_SIMPLE_ACTION;
-            will_daemonize = false;
             break;
         case ACT_CHECKCFG:
             cmode = CONF_CHECK;
-            will_daemonize = false;
             break;
         case ACT_START:
         case ACT_RESTART:
         case ACT_CRESTART:
             cmode = CONF_START;
-            will_daemonize = !copts.foreground;
             break;
         default:
             dmn_assert(0);
             break;
     }
 
+    // All simple/check actions are implicitly foreground invocations
+    if(cmode != CONF_START)
+        copts.foreground = true;
+
+    // Do not allow disabling syslog when attempting to daemonize
+    //   without the foreground flag, as this would result in
+    //   complete silence over all messaging channels
+    if(!copts.use_syslog && !copts.foreground)
+        usage(argv[0]);
+
     // init1 lets us start using dmn log funcs for config errors, etc
-    dmn_init1(copts.debug, copts.foreground, !will_daemonize, will_daemonize, PACKAGE_NAME);
+    dmn_init1(copts.debug, copts.foreground, copts.use_syslog, PACKAGE_NAME);
 
     // Initialize net stuff in libgdnsd - needed for config load
     gdnsd_init_net();
@@ -449,13 +441,27 @@ int main(int argc, char** argv) {
         exit(dmn_signal(SIGUSR1));
     }
 
-    if(action == ACT_CRESTART) {
+    // from here out, we can only be doing checkcfg or [re]start
+    dmn_assert(
+           action == ACT_START
+        || action == ACT_RESTART
+        || action == ACT_CRESTART
+        || action == ACT_CHECKCFG
+    );
+
+    if(action != ACT_CHECKCFG) {
         const pid_t oldpid = dmn_status();
-        if(!oldpid) {
-            log_info("condrestart: not running, will not restart");
-            exit(0);
+        if(action == ACT_START && oldpid) {
+            log_err("start: already running at pid %li", (long)oldpid);
+            exit(1);
         }
-        action = ACT_RESTART;
+        else if(action == ACT_CRESTART) {
+            if(!oldpid) {
+                log_info("condrestart: not running, will not restart");
+                exit(0);
+            }
+            action = ACT_RESTART;
+        }
     }
 
     // Set up and validate privdrop info if necc
@@ -556,10 +562,6 @@ int main(int argc, char** argv) {
         socks_daemon_check_all(false);
     }
 
-    // Start the ev_timer for the watchdog, if applicable,
-    //   which will run in the monitoring thread/loop.
-    watchdog_start(mon_loop);
-
     // Start up all of the UDP and TCP threads, each of
     // which has all signals blocked and has its own
     // event loop (libev for TCP, manual blocking loop for UDP)
@@ -582,10 +584,13 @@ int main(int argc, char** argv) {
     sigaddset(&mainthread_sigs, SIGINT);
     sigaddset(&mainthread_sigs, SIGTERM);
     sigaddset(&mainthread_sigs, SIGUSR1);
+    sigaddset(&mainthread_sigs, SIGHUP);
 
     // Block the relevant signals before entering the sigwait() loop
     sigset_t sigmask_prev;
-    pthread_sigmask(SIG_BLOCK, &mainthread_sigs, &sigmask_prev);
+    sigemptyset(&sigmask_prev);
+    if(pthread_sigmask(SIG_BLOCK, &mainthread_sigs, &sigmask_prev))
+        log_fatal("pthread_sigmask() failed");
 
     // Report success back to whoever invoked "start" or "restart" command...
     //  (or in the foreground case, kill our helper process)
@@ -614,19 +619,36 @@ int main(int argc, char** argv) {
                 zsrc_djb_sigusr1();
                 zsrc_rfc1035_sigusr1();
                 break;
+            case SIGHUP:
+                log_info("Received HUP signal (ignored; does nothing in this version!)");
+                break;
             default:
                 dmn_assert(0);
                 break;
         }
     }
 
+    // Ask statio thread to send final stats to the log
+    statio_final_stats();
+
+    // let newer versions of systemd know what's going on
+    //  in the case the int/term sig came from outside
+    dmn_sd_notify("STOPPING=1", true);
+
+    // get rid of child procs (e.g. extmon helper)
+    gdnsd_kill_registered_children();
+
     // deallocate resources in debug mode
     atexit_debug_execute();
 
-    // Restore normal signal mask
-    pthread_sigmask(SIG_SETMASK, &sigmask_prev, NULL);
+    // wait for stats thread to finish logging request
+    statio_final_stats_wait();
 
-#ifdef COVERTEST_EXIT
+    // Restore normal signal mask
+    if(pthread_sigmask(SIG_SETMASK, &sigmask_prev, NULL))
+        log_fatal("pthread_sigmask() failed");
+
+#ifdef DMN_COVERTEST_EXIT
     // We have to use exit() when testing coverage, as raise()
     //   skips over writing out gcov data
     exit(0);

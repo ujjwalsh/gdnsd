@@ -33,22 +33,22 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-// gcc function attributes
-#if defined __GNUC__ && __GNUC__ >= 3 // gcc 3.0+
+// gcc/clang features
+
+#if defined __GNUC__ && (__GNUC__ < 3 || (__GNUC__ == 3 && __GNUC_MINOR__ < 4))
+#  error Your GCC is way too old (< 3.4)...
+#endif
+
+#if defined __clang__ || defined __GNUC__
 #  define DMN_F_PRINTF(X,Y)   __attribute__((__format__(__printf__, X, Y)))
-#  if __GNUC__ > 3 || __GNUC_MINOR__ > 2 // gcc 3.3+
-#    define DMN_F_NONNULLX(...) __attribute__((__nonnull__(__VA_ARGS__)))
-#    define DMN_F_NONNULL       __attribute__((__nonnull__))
-#  else
-#    define DMN_F_NONNULLX(...)
-#    define DMN_F_NONNULL
-#  endif
-#  if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ > 4) // gcc 4.5+
-#    define DMN_HAVE_UNREACH_BUILTIN 1
-#  elif defined __clang__ // clang needs a separate check for unreach
+#  define DMN_F_NONNULLX(...) __attribute__((__nonnull__(__VA_ARGS__)))
+#  define DMN_F_NONNULL       __attribute__((__nonnull__))
+#  if defined __clang__
 #    if __has_builtin(__builtin_unreachable)
 #      define DMN_HAVE_UNREACH_BUILTIN 1
 #    endif
+#  elif __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 5)
+#    define DMN_HAVE_UNREACH_BUILTIN 1
 #  endif
 #else
 #  define DMN_F_PRINTF(X,Y)
@@ -69,17 +69,15 @@ void dmn_pcall(unsigned id);
 // dmn_init1() *must* be called before *any* other libdmn function!
 // debug: if false, all potential messages from dmn_log_debug() and
 //    dmn_log_devdebug() will be suppressed.
-// foreground: if true, the caller has no intention of actually daemonizing
-//    and will stay in the foreground, attached to the terminal.
-// stderr_info: if true, log_info() level messages wll be sent to stderr
-//    when applicable.  Otherwise, only log_warn() and higher are sent
-//    to stderr when applicable.
+// foreground: if true, we won't actually do fork/setsid-type daemonization,
+//    but will still go through all the other motions.
+// use_syslog: whether to log to syslog at all (false for test/cmdline stuff)
 // name: the name of your daemon/program.  Will be used for log outputs
 //    and pidfile naming.
 // Immediately after init1(), only the logging APIs (dmn_log_*, dmn_logf_*
 //    dmn_fmtbuf_*) are available.
 DMN_F_NONNULL
-void dmn_init1(bool debug, bool foreground, bool stderr_info, bool use_syslog, const char* name);
+void dmn_init1(bool debug, bool foreground, bool use_syslog, const char* name);
 
 // dmn_init2() must be called after dmn_init1() and before dmn_init3().
 // pid_dir: This is the application-specific(!)
@@ -152,29 +150,17 @@ pid_t dmn_stop(void);
 int dmn_signal(int sig);
 
 /***
-**** Watchdog interfaces:
-**** Basically, iff dmn_wdog_get_msec() returns a non-zero value
-****   (when called during startup, after init1()),
-****   the daemon should call dmn_wdog_ping() at approximate
-****   intervals of that many milliseconds during runtime.
-**** For now this only wraps systemd's watchdog mechanism,
-****   but could be extended to other stuff in the future.
-***/
-unsigned dmn_wdog_get_msec(void);
-void dmn_wdog_ping(void);
-
-/***
 **** Logging interfaces
 ***/
 
-// This is used "internally" by dmn_log_debug(), but gdnsd has
-//   use-cases for this and the others two getters below for
-//   the special case of plugin_extmon's helper process.
+// This is used "internally" by dmn_log_debug(), but gdnsd also
+//   uses this for the special case of plugin_extmon's helper process.
 bool dmn_get_debug(void);
-bool dmn_get_foreground(void);
+// again, special for plugin_extmon...
+bool dmn_get_syslog_alive(void);
 
 // This is a syslog()-like interface that will log
-//  to stderr and/or syslog (or sd_journal) as appropriate
+//  to stderr and/or syslog as appropriate
 //  depending on daemon lifecycle, and is thread-safe.
 DMN_F_NONNULLX(2) DMN_F_PRINTF(2,3)
 void dmn_logger(int level, const char* fmt, ...);
@@ -183,6 +169,12 @@ void dmn_logger(int level, const char* fmt, ...);
 //  easier to integrate with your own custom wrapper code.
 DMN_F_NONNULLX(2)
 void dmn_loggerv(int level, const char* fmt, va_list ap);
+
+// If running under systemd, send it a message over the
+//   notification socket.  If !optional and the message
+//   cannot be sent, a fatal error will be thrown.
+DMN_F_NONNULL
+void dmn_sd_notify(const char* notify_msg, const bool optional);
 
 // The intended simple API for logging with 5 separate
 //  function-call-like interfaces with different levels.
@@ -202,15 +194,22 @@ void dmn_loggerv(int level, const char* fmt, va_list ap);
 // DMN_NO_FATAL_COVERAGE is to allow coverage testing to skip
 //   over fatal conditions.  If your tests don't cover those
 //   for pragmatic reasons, this considerably reduces line noise.
-// Note that this is only going to work if your tests *never*
+//   Note that this is only going to work if your tests *never*
 //   exercise a fatal case; it will probably cause random
 //   bugs leading to test failures otherwise.
+// DMN_COVERTEST_EXIT uses exit(57) rather than abort() on fatals,
+//   because exit() is needed to gather coverage data.
 #ifdef DMN_NO_FATAL_COVERAGE
 #  define dmn_log_fatal(...) ((void)(0))
-#else
+#elif defined DMN_COVERTEST_EXIT
 #  define dmn_log_fatal(...) do {\
      dmn_logger(LOG_CRIT,__VA_ARGS__);\
      exit(57);\
+   } while(0)
+#else
+#  define dmn_log_fatal(...) do {\
+     dmn_logger(LOG_CRIT,__VA_ARGS__);\
+     abort();\
    } while(0)
 #endif
 
@@ -260,7 +259,8 @@ void dmn_loggerv(int level, const char* fmt, va_list ap);
 //
 //  dmn_log_warn("The integer had value %s!", my_int_formatter(someint));
 //
-char* dmn_fmtbuf_alloc(unsigned size);
+// if size==0, the retval will be NULL
+char* dmn_fmtbuf_alloc(const unsigned size);
 
 // Reset (free allocations within) the format buffer.  Do not use this
 //  with the normal log functions.  If you use the fmtbuf-based formatters

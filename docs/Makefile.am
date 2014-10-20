@@ -28,7 +28,8 @@ MAN_SED = $(SED) \
 	-e 's|@GDNSD_DEFPATH_STATE[@]|$(GDNSD_DEFPATH_STATE)|g' \
 	-e 's|@GDNSD_DEFPATH_RUN[@]|$(GDNSD_DEFPATH_RUN)|g' \
 	-e 's|@GDNSD_DEFPATH_LIB[@]|$(GDNSD_DEFPATH_LIB)|g' \
-	-e 's|@GDNSD_DEFPATH_LIBEXEC[@]|$(GDNSD_DEFPATH_LIBEXEC)|g'
+	-e 's|@GDNSD_DEFPATH_LIBEXEC[@]|$(GDNSD_DEFPATH_LIBEXEC)|g' \
+	-e 's|@GDNSD_SBINDIR[@]|$(sbindir)|g'
 
 # Gather up the .pod files (which are distributed but not installed)
 ALL_PODS = $(PODS_1) $(PODS_3) $(PODS_5) $(PODS_8)
@@ -64,5 +65,5 @@ wikidocs:
 	@for podsrc in $(ALL_PODS); do \
 		wikifn=`echo $$podsrc | $(PERL) -pe 's/^([a-z])/uc($$1)/e; s/[_.-]([a-zA-Z0-9])/uc($$1)/ge; s/Pod$$/.pod/'`; \
 		echo Copying $$podsrc to $(WIKI_DIR)/$$wikifn ...; \
-		cp $$podsrc $(WIKI_DIR)/$$wikifn; \
+		$(MAN_SED) <$$podsrc >$(WIKI_DIR)/$$wikifn; \
 	done

@@ -88,7 +88,7 @@ static const char* _logf_lstack(const uint8_t** lstack, int depth) {
 #ifndef HAVE_BUILTIN_CLZ
 
 F_CONST
-static inline uint32_t count2mask(uint32_t x) {
+static uint32_t count2mask(uint32_t x) {
     x |= 1U;
     x |= x >> 1U;
     x |= x >> 2U;
@@ -101,7 +101,7 @@ static inline uint32_t count2mask(uint32_t x) {
 #else
 
 F_CONST
-static inline uint32_t count2mask(const uint32_t x) {
+static uint32_t count2mask(const uint32_t x) {
     // This variant is about twice as fast as the above, but
     //  only available w/ GCC 3.4 and above.
     return ((1U << (31U - __builtin_clz(x|1U))) << 1U) - 1U;
@@ -717,7 +717,7 @@ bool ltree_add_rec_soa(const zone_t* zone, const uint8_t* dname, const uint8_t* 
 
 // It is critical that get/add_rrset_rfc3597 are not called with
 //  rrtype set to the number of other known, explicitly supported types...
-F_NONNULL
+F_NONNULL F_PURE
 static ltree_rrset_rfc3597_t* ltree_node_get_rrset_rfc3597(const ltree_node_t* node, const unsigned rrtype) {
     dmn_assert(node);
     ltree_rrset_t* rrsets = node->rrsets;
