@@ -1,4 +1,3 @@
-
 =head1 NAME
 
 gdnsd - An authoritative DNS daemon
@@ -282,6 +281,11 @@ be authoritative for both a subzone and its parent zone at the
 same time, as each "role" (parent and child) requires different
 responses to requests for data within the child zone.  gdnsd
 choses to default to the "parent" role in these conflict cases.
+
+Tools which are used to update zonefiles while gdnsd is running should always
+use atomic operations (C<rename()>, C<unlink()>, C<link()>) to alter the zone
+files.  See the documentation for C<zones_rfc1035_quiesce> in
+L<gdnsd.config(5)> for more details about this.
 
 =head1 ZONE FILES - DJBDNS
 

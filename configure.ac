@@ -1,8 +1,8 @@
 AC_PREREQ([2.63])
-AC_INIT([gdnsd],[2.1.2],[blblack@gmail.com],[gdnsd])
-AC_CONFIG_SRCDIR([gdnsd/main.c])
+AC_INIT([gdnsd],[2.2.0],[https://github.com/gdnsd/gdnsd/issues])
+AC_CONFIG_SRCDIR([src/main.c])
 AC_CONFIG_AUX_DIR([acaux])
-AM_INIT_AUTOMAKE([1.11.1 dist-xz no-dist-gzip foreign tar-ustar -Wall])
+AM_INIT_AUTOMAKE([1.11.1 dist-xz no-dist-gzip foreign tar-ustar subdir-objects -Wall])
 AC_CONFIG_MACRO_DIR([m4])
 AM_SILENT_RULES([yes])
 
@@ -15,7 +15,7 @@ AM_SILENT_RULES([yes])
 #   as a final arg to AC_INIT.  We can't define it ourselves here
 #   with the same name as this causes compiler warnings that matter
 #   during other parts of ./configure.  So, pick a new name for now.
-AC_DEFINE([PKG_URL],["https://github.com/gdnsd/gdnsd/"],[Package URL])
+AC_DEFINE([PKG_URL],["http://gdnsd.org"],[Package URL])
 #---
 # This hack makes PKG_CHECK_VARS from m4/pkg.m4 work on autoconf 2.63
 # ( courtesy of sunnybear in https://github.com/gdnsd/gdnsd/issues/85 )
@@ -48,6 +48,16 @@ AX_PTHREAD(,AC_MSG_ERROR([POSIX threads support is required]))
 LIBS="$PTHREAD_LIBS $LIBS"
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 CC="$PTHREAD_CC"
+
+AC_MSG_CHECKING([if compiling with clang])
+AC_COMPILE_IFELSE(
+[AC_LANG_PROGRAM([], [[
+#ifndef __clang__
+       not clang
+#endif
+]])],
+[CLANG=yes], [CLANG=no])
+AC_MSG_RESULT([$CLANG])
 
 # need to know endian-ness
 AC_C_BIGENDIAN
@@ -89,6 +99,10 @@ else
     TRY_DEBUG_CFLAGS=
 fi
 
+# These are only for urcu header stuff currently
+AC_DEFINE([_LGPL_SOURCE], 1, [LGPL-compatible source])
+AC_DEFINE([GDNSD_SOURCE_TREE], 1, [Identifies local source vs 3rd party])
+
 harden=1
 AC_ARG_WITH([hardening],[AS_HELP_STRING([--without-hardening],
     [Disable compiler/linker flags for security hardening])],[
@@ -107,54 +121,63 @@ if test $harden = 1; then
     AX_APPEND_COMPILE_FLAGS([-fPIE],[CFLAGS_PIE],[])
     AX_APPEND_LINK_FLAGS([-pie],[LDFLAGS_PIE],[])
 fi
-
 AC_SUBST([CFLAGS_PIE])
 AC_SUBST([LDFLAGS_PIE])
-AX_APPEND_LINK_FLAGS([$HARDEN_LINKER -Wl,--as-needed],[LDFLAGS],[])
+
+# clang does not fail on some unsupported options without this,
+#  but it screws up some of our warnflag tests on gcc as well.
+CLANG_WERROR=
+if test $CLANG = yes; then
+   CLANG_WERROR="-Werror"
+fi
+
+AX_APPEND_LINK_FLAGS([\
+    $HARDEN_LINKER \
+    -Wl,--as-needed \
+    -Wl,--gc-sections \
+],[LDFLAGS],[$CLANG_WERROR])
+
 AX_APPEND_COMPILE_FLAGS([\
     $TRY_DEBUG_CFLAGS \
     $HARDEN_COMPILER \
+    -fvisibility=hidden \
+    -ffunction-sections \
+    -fdata-sections \
     -fno-common \
     -pipe \
     -Wall \
     -Wextra \
     -Wbad-function-cast \
     -Wcast-align \
-    -Wclobbered \
-    -Wempty-body \
+    -Wcast-qual \
     -Wendif-labels \
     -Wfloat-equal \
+    -Wfloat-conversion \
     -Wformat=2 \
-    -Wformat-nonliteral \
-    -Wformat-security \
-    -Wignored-qualifiers \
     -Winit-self \
     -Wlogical-op \
     -Wmissing-declarations \
-    -Wmissing-field-initializers \
     -Wmissing-include-dirs \
-    -Wmissing-parameter-type \
     -Wmissing-prototypes \
-    -Wold-style-declaration \
     -Wold-style-definition \
-    -Woverride-init \
     -Wpointer-arith \
     -Wredundant-decls \
     -Wshadow \
-    -Wsign-compare \
-    -Wstack-protector \
-    -Wstrict-aliasing=3 \
+    -Wsign-conversion \
     -Wstrict-overflow=5 \
     -Wstrict-prototypes \
-    -Wtype-limits \
+    -Wswitch-default \
     -Wundef \
-    -Wuninitialized \
     -Wunused \
     -Wwrite-strings \
-],[CFLAGS],[-Werror])
+    -Wthis-does-not-exist \
+],[CFLAGS],[$CLANG_WERROR])
 
 # include libdmn configure stuff
-m4_include([gdnsd/libgdnsd/libdmn/libdmn.m4])
+m4_include([libgdnsd/libdmn.m4])
+
+# include libgdmaps configure stuff
+m4_include([libgdmaps/libgdmaps.m4])
 
 # explicit check on math lib.  libev also does this, but
 #  might not in the future, and we need it directly
@@ -165,8 +188,8 @@ MATH_LIB=$LIBS
 LIBS=$XLIBS
 AC_SUBST([MATH_LIB])
 
-# posix_fadvise to readahead on zonefiles
-AC_CHECK_FUNCS([posix_fadvise])
+# posix_madvise to readahead on zonefiles
+AC_CHECK_FUNCS([posix_madvise])
 
 # high-precision mtime from struct stat
 AC_CHECK_MEMBERS([struct stat.st_mtim.tv_nsec])
@@ -181,65 +204,8 @@ if test $HAS_SENDMMSG -eq 1; then
     AC_DEFINE([USE_SENDMMSG],1,[Linux sendmmsg is usable])
 fi
 
-# ======== Begin Network Stuff ==========
-AC_DEFINE([__APPLE_USE_RFC_3542],1,[Force MacOS Lion to use RFC3542 IPv6 stuff])
-
-# Find out if -lsocket -lnsl is needed, and put them
-#  in $NETLIBS if so, and use them for these network-related
-#  feature checks...
-XLIBS=$LIBS
-LIBS=""
-AC_SEARCH_LIBS([gethostent],[nsl],[],[],[])
-AC_SEARCH_LIBS([setsockopt],[socket],[],[],[])
-NETLIBS=$LIBS
-AC_SUBST([NETLIBS])
-
-# sockaddr<->string mapping
-AC_CHECK_FUNCS([inet_pton getifaddrs getaddrinfo getnameinfo],,AC_MSG_ERROR([required network library calls missing]))
-AC_CHECK_DECLS([NI_NUMERICHOST, NI_NUMERICSERV],,AC_MSG_ERROR([NI_NUMERIC* decls missing]),[
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-])
-AC_CHECK_DECLS([AF_INET6, PF_INET6, AF_INET, PF_INET, AF_UNSPEC],,AC_MSG_ERROR([AF_*/PF_* decls missing]),[
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-])
-
-# The IPv4 UDP source-addr fixup stuff is optional.  If not present, gdnsd
-#  will abort at startup if configured to listen on 0.0.0.0.
-AC_CHECK_DECLS([IP_PKTINFO, IP_RECVDSTADDR, IP_SENDSRCADDR],,,[
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-])
-
-# Whereas the equivalent IPv6 source-addr/flow/interface stuff is absolutely
-#  required even for specific listen-adddreses, because we have to at minimum
-#  copy the sending hosts' flow labels.  We allow IPV6_RECVPKTINFO to be optional,
-#  but not the corresponding IPV6_PKTINFO (for the MacOS quirk of
-#  re-using IPV6_PKTINFO as IPV6_RECVPKTINFO prior to Lion, where we #define
-#  the latter to the former).
-AC_CHECK_DECLS([IPV6_PKTINFO],,AC_MSG_ERROR([IPV6_PKTINFO is required]),[
-    #include <sys/types.h>
-    #include <sys/socket.h>
-    #include <netinet/in.h>
-    #include <netinet/ip.h>
-])
-AC_CHECK_DECLS([IPV6_RECVPKTINFO],,,[
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-])
-
-# restore original LIBS, from before NETLIBS
-LIBS=$XLIBS
-
-# ======== End Network Stuff ==========
+# Network Stuff
+AC_DEFINE([__APPLE_USE_RFC_3542],1,[Force MacOS Lion and higher to use RFC3542 IPv6 stuff])
 
 # liburcu-qsbr
 KILL_QSBR=0
@@ -250,20 +216,21 @@ AC_ARG_WITH([urcu],[AS_HELP_STRING([--without-urcu],
     fi
 ])
 
-HAVE_QSBR=0
+GDNSD_B_QSBR=0
 QSBRLIBS=
 if test $KILL_QSBR -eq 0; then
     AC_CHECK_HEADER(urcu-qsbr.h,[
         XLIBS=$LIBS
         LIBS=""
         AC_CHECK_LIB([urcu-qsbr],[perror],[
-            HAVE_QSBR=1
-            AC_DEFINE([HAVE_QSBR], 1, [Use liburcu-qsbr])
+            GDNSD_B_QSBR=1
             QSBRLIBS="-lurcu-qsbr"
         ])
         LIBS=$XLIBS
     ])
 fi
+AC_DEFINE_UNQUOTED([GDNSD_B_QSBR], [$GDNSD_B_QSBR], [Use liburcu-qsbr])
+AC_SUBST([GDNSD_B_QSBR])
 AC_SUBST([QSBRLIBS])
 
 # systemd unit dir for "make install" of gdnsd.service
@@ -369,38 +336,86 @@ if test $USE_INOTIFY -eq 1; then
     AC_DEFINE([USE_INOTIFY], 1, [Linux 2.6.36+ inotify support])
 fi
 
-# Basic perl 5.8.1+ and pod2man for doc generation
-AC_PATH_PROG([PERL],[perl],[missing])
+# Basic perl 5.10.1+
+AC_ARG_VAR([PERL],[path to Perl 5.10.1 or higher])
+if test "x$ac_cv_env_PERL_set" != "xset"; then
+    AC_PATH_PROG([PERL],[perl],[missing])
+fi
 if test x"$PERL" = xmissing; then
     AC_MSG_ERROR([Cannot find required perl binary])
 fi
-AX_PROG_PERL_VERSION([5.8.1],,[AC_MSG_ERROR([Perl 5.8.1 or higher required])])
-AC_PATH_PROG([POD2MAN],[pod2man],[missing])
+AX_PROG_PERL_VERSION([5.10.1],,[AC_MSG_ERROR([Perl 5.10.1 or higher required])])
+
+# pod2man
+AC_ARG_VAR([POD2MAN],[path to the Perl "pod2man" command])
+if test "x$ac_cv_env_POD2MAN_set" != "xset"; then
+    AC_PATH_PROG([POD2MAN],[pod2man],[missing])
+fi
 if test x"$POD2MAN" = xmissing; then
     AC_MSG_ERROR([Cannot find required pod2man binary (perl podlater)])
 fi
 
-# Various perl modules for the testsuite (optional)
+# prove for test harness (optional)
+AC_ARG_VAR([PROVE], [path to the Perl Test::Harness "prove" command])
+if test "x$ac_cv_env_PROVE_set" != "xset"; then
+    AC_PATH_PROG([PROVE],[prove],[missing])
+fi
+if test x"$PROVE" = xmissing; then
+    AC_MSG_WARN([Cannot "make check" without the Perl Test::Harness "prove" command])
+fi
+
+# various perl modules for the testsuites (optional)
 HAVE_TESTSUITE_MODULES=0
-AX_PROG_PERL_MODULES([Test::More LWP=5.805 Socket6 IO::Socket::INET6 HTTP::Daemon],[HAVE_TESTSUITE_MODULES=1], AC_MSG_WARN([[Cannot "make check" without Perl modules Test::More (aka Test-Simple for some package managers), LWP (aka libwww-perl) 5.805+, Socket6, IO::Socket::INET6, and HTTP::Daemon]]))
+AX_PROG_PERL_MODULES(
+    [Test::More JSON::PP Socket6 IO::Socket::INET6 HTTP::Daemon LWP],
+    [HAVE_TESTSUITE_MODULES=1],
+    AC_MSG_WARN([[Cannot "make check" without Perl modules Test::More, JSON::PP, Socket6, IO::Socket::INET6, HTTP::Daemon, and LWP (aka libwww-perl)]])
+)
 AC_SUBST([HAVE_TESTSUITE_MODULES])
 
 # Find ragel
-AC_REQUIRE_AUX_FILE([noragel])
-AC_MSG_CHECKING([for Ragel v6.x]);
-AC_PATH_PROGS_FEATURE_CHECK([RAGEL], [ragel],
-  [[$ac_path_RAGEL --version |$EGREP 'Ragel State Machine Compiler version 6\.' >/dev/null && ac_cv_path_RAGEL=$ac_path_RAGEL ac_path_RAGEL_found=:]],
-  [ac_cv_path_RAGEL=$am_aux_dir/noragel])
-AC_SUBST([RAGEL], [$ac_cv_path_RAGEL])
-AC_MSG_RESULT([$ac_cv_path_RAGEL])
+AC_ARG_VAR([RAGEL],[path to ragel version 6.x])
+if test "x$ac_cv_env_RAGEL_set" != "xset"; then
+    AC_PATH_PROG([RAGEL],[ragel],[missing])
+fi
+if test "x$RAGEL" = xmissing; then
+    AC_MSG_ERROR([Ragel not found])
+else
+    $RAGEL --version|$EGREP 'Ragel State Machine Compiler version 6\.' >/dev/null \
+        || AC_MSG_ERROR([Ragel is not version 6.x])
+fi
 
-# download/unpack for GeoLite data for plugin_geoip tests
-AC_CHECK_PROGS(GEOLITE_DECOMP, [xz], [none])
-AC_CHECK_PROGS(GEOLITE_DL, [wget curl], [none])
+# Discover CPUs for testsuite parallelism, allowing user to override via env var.
+# I'd much rather either:
+#  (a) steal the user-supplied -jN argument from make inside of Makefile.am,
+#      but there doesn't seem to be a really good way to do that reliably, especially with
+#      recursive make.  or...
+#  (b) Set -jN based on TEST_CPUS (and rename it BUILD_CPUS), but there doesn't seem
+#      to be any clean way to do that either without disabling direct user override
+#      of that in MAKEFLAGS at make invocation time...
+# As things stand with this commit, user-supplied -jN controls build parallelism
+#  and is not auto-detected, while TEST_CPUS controls testsuite parallelism, and
+#  is auto-detected but can be overridden at configure time.
+AC_ARG_VAR([TEST_CPUS],[number of CPUs to assume when parallelizing the testsuite])
+AC_MSG_CHECKING([number of CPUs available for testing])
+if test "x$ac_cv_env_TEST_CPUS_set" = "xset"; then
+    AC_MSG_RESULT([$TEST_CPUS (user-specified)])
+else
+    # These two methods should work for the *BSDs, MacOS, and Linux
+    TEST_CPUS=$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+    AC_MSG_RESULT([$TEST_CPUS])
+fi
+
+# Decompressor for compressed test data from git submodule
+AC_ARG_VAR([XZ],[path to xz compression utility])
+if test "x$ac_cv_env_XZ_set" != "xset"; then
+    AC_PATH_PROG([XZ], [xz], [missing])
+fi
+AM_CONDITIONAL(HAS_XZ, [test x$XZ != xmissing])
 
 # Allow user to override the port range we use for testing
 AC_ARG_WITH([testport],[AS_HELP_STRING([--with-testport=N],
-    [The testsuite needs a set of 3 IP port numbers to use, starting at "N", that it can bind to on "127.0.0.1".  If the default value of "12345" does not work for you, change it here.])],
+    [The testsuite needs ~300 IP port numbers to use, starting at "N", that it can bind to on "127.0.0.1" and "::1".  If the default value of "12345" does not work for you, change it here.])],
     [],
     [with_testport=12345]
 )
@@ -433,54 +448,45 @@ AC_SUBST([GDNSD_DEFPATH_LIBEXEC])
 # clump up all of the libgdnsd libdeps for re-use in LDADD for
 #   binaries that link libgdnsd on platforms where libtool's
 #   automatic dep resolution is disabled
-LIBGDNSD_LIBS="$QSBRLIBS $LIBEV_LIBS $NETLIBS $LIBADD_DLOPEN"
+LIBGDNSD_LIBS="$MATH_LIB $QSBRLIBS $LIBEV_LIBS $LIBADD_DLOPEN $LIBUNWIND_LIBS"
 AC_SUBST([LIBGDNSD_LIBS])
+
+# BUILD_FEATURES for cmdline output
+B_FEAT="prod"
+if test "x$developer" != xno;    then B_FEAT="dev";             fi
+if test "x$HAS_SENDMMSG" = x1;   then B_FEAT="$B_FEAT mmsg";    fi
+if test "x$USE_INOTIFY" = x1;    then B_FEAT="$B_FEAT inotify"; fi
+if test "x$HAVE_LIBUNWIND" = x1; then B_FEAT="$B_FEAT unwind";  fi
+if test "x$HAVE_GEOIP2" = x1;    then B_FEAT="$B_FEAT geoip2";  fi
+if test "x$GDNSD_B_QSBR" = x1;   then B_FEAT="$B_FEAT urcu";    fi
+AC_DEFINE_UNQUOTED([BUILD_FEATURES], ["$B_FEAT"], [Build Features])
+
+# BUILD_INFO for cmdline output
+B_SRC=tarball
+if test -d ${srcdir}/${GIT_DIR:-.git} -o -f ${srcdir}/.git; then
+    [B_SRC=`cd ${srcdir}; git describe --match 'v[0-9]*' --always --dirty`]
+fi
+B_HOST=`uname -n`
+B_DATE=`date -u "+%Y-%m-%d %H:%M:%S UTC"`
+B_INFO="$B_SRC ${USER}@${B_HOST} $B_DATE"
+AC_DEFINE_UNQUOTED([BUILD_INFO],["$B_INFO"],[Build Info])
 
 # Output generation
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([
   Makefile
-  gdnsd/Makefile
-  gdnsd/libgdnsd/Makefile
-  gdnsd/libgdnsd/libdmn/Makefile
-  sysd/Makefile
   t/Makefile
-  docs/Makefile
-  plugins/Makefile
-  plugins/extfile/Makefile
-  plugins/extmon/Makefile
-  plugins/meta/Makefile
-  plugins/meta/libgdmaps/Makefile
-  plugins/meta/libgdmaps/t/Makefile
-  plugins/weighted/Makefile
-  plugins/trivial/Makefile
+  t/libtap/Makefile
+  t/libgdmaps/Makefile
 ])
+AC_CONFIG_COMMANDS([mkdirs],[$MKDIR_P sysd; $MKDIR_P docs])
 AC_OUTPUT
 
-# Summary output for the user
-
-if test "x$developer" != xno; then CFSUM_DEV=Yes; else CFSUM_DEV=No; fi
-if test "x$HAS_SENDMMSG" = x1; then CFSUM_SENDMMSG=Yes; else CFSUM_SENDMMSG=No; fi
-if test "x$USE_INOTIFY" = x1; then CFSUM_INOTIFY=Yes; else CFSUM_INOTIFY=No; fi
-if test "x$HAVE_QSBR" = x1; then
-    CFSUM_QSBR=Yes
-else
-    if test "x$KILL_QSBR" = x1; then
-        CFSUM_QSBR=Disabled
-    else
-        CFSUM_QSBR=No
-    fi
-fi
-CFSUM_TP=$TESTPORT_START
-echo "======================================="
-echo "CPPFLAGS: $CPPFLAGS"
-echo "CFLAGS: $CFLAGS $CFLAGS_PIE"
-echo "LDFLAGS: $LDFLAGS $LDFLAGS_PIE"
-echo "======================================="
-echo "| Configuration Summary:"
-echo "| Developer Build:            $CFSUM_DEV"
-echo "| Userspace-rcu support:      $CFSUM_QSBR"
-echo "| Linux sendmmsg support:     $CFSUM_SENDMMSG"
-echo "| Linux inotify support:      $CFSUM_INOTIFY"
-echo "| Test Port Start:            $CFSUM_TP"
-echo "======================================="
+echo "========================================================================"
+echo "| Build Info: $B_INFO"
+echo "| Build Features: $B_FEAT"
+echo "| CC: $CC"
+echo "| CPPFLAGS: $CPPFLAGS"
+echo "| CFLAGS: $CFLAGS $CFLAGS_PIE"
+echo "| LDFLAGS: $LDFLAGS $LDFLAGS_PIE"
+echo "========================================================================"

@@ -114,30 +114,28 @@ sub safe_rmtree {
 
 my %SIGS;
 {
-    my $i = 0;
     defined $Config{sig_name} || die "No sigs?";
-    foreach my $name (split(' ', $Config{sig_name})) {
-        $SIGS{$name} = $i++;
-    }
+    defined $Config{sig_num} || die "No sigs?";
+    my @names = split(' ', $Config{sig_name});
+    @SIGS{@names} = split(' ', $Config{sig_num});
 }
 
-# Set up per-testfile output directory and zones input directory
+# Set up per-testfile output directory, zones input directory,
+#   and $TEST_SERIAL.
 our $OUTDIR;
+our $TEST_SERIAL;
 our $ALTZONES_IN = $FindBin::Bin . '/altzones/';
 {
     my $tname = $FindBin::Bin;
     $tname =~ s{^.*/}{};
     $tname .= '_' . $FindBin::Script;
     $tname =~ s{\.t$}{};
-
     $OUTDIR = $ENV{TESTOUT_DIR} . '/' . $tname;
-}
 
-# this makes gdnsd start faster on low-res filesystems,
-#   individual scripts which actually test runtime
-#   zone data changes must disable this for the
-#   tests to work accurately!
-$ENV{GDNSD_TESTSUITE_NO_ZONEFILE_MODS} = 1;
+    $FindBin::Script =~ m{^0*([0-9]{1,3})}
+        or die "Cannot figure out TEST_SERIAL value for $tname";
+    $TEST_SERIAL = $1;
+}
 
 # generic flag to eliminate various timer delays under testing
 $ENV{GDNSD_TESTSUITE_NODELAY} = 1;
@@ -151,22 +149,13 @@ our $TESTPORT_START = $ENV{TESTPORT_START};
 die "Test port start specification is not a number"
     unless looks_like_number($TESTPORT_START);
 
-our $DNS_PORT = $TESTPORT_START;
-our $HTTP_PORT = $TESTPORT_START + 1;
-our $EXTRA_PORT  = $TESTPORT_START + 2;
+our $DNS_PORT = $TESTPORT_START + (5 * $TEST_SERIAL);
+our $HTTP_PORT = $DNS_PORT + 1;
+our $EXTRA_PORT  = $DNS_PORT + 2;
+our $DNS_SPORT4 = $DNS_PORT + 3;
+our $DNS_SPORT6 = $DNS_PORT + 4;
 
 our $saved_pid;
-
-# Skip V6 tests if perl doesn't have the modules for it,
-#  or it doesn't work at runtime.
-our $HAVE_V6 = 1;
-{
-    my $test_sock = IO::Socket::INET6->new(LocalAddr => '::1', LocalPort => $DNS_PORT);
-    if(!$test_sock) {
-        warn "IPv6 tests disabled (Cannot bind to [::1]:$DNS_PORT: $@)";
-        $HAVE_V6=0;
-    }
-}
 
 # If user runs testsuite as root, we try to set the privdrop
 #   user to nobody as a more-reliable choice.  Failing that,
@@ -176,11 +165,11 @@ our $PRIVDROP_USER = ($> == 0) ? 'nobody' : '';
 
 our $GDNSD_BIN = $ENV{INSTALLCHECK_SBINDIR}
     ? "$ENV{INSTALLCHECK_SBINDIR}/gdnsd"
-    : "$ENV{TOP_BUILDDIR}/gdnsd/gdnsd";
+    : "$ENV{TOP_BUILDDIR}/src/gdnsd";
 
 our $EXTMON_BIN = $ENV{INSTALLCHECK_BINDIR}
     ? "$ENV{INSTALLCHECK_BINDIR}/gdnsd_extmon_helper"
-    : "$ENV{TOP_BUILDDIR}/plugins/extmon/gdnsd_extmon_helper";
+    : "$ENV{TOP_BUILDDIR}/plugins/gdnsd_extmon_helper";
 
 # During installcheck, the default hardcoded plugin path
 #  should work correctly for finding the installed plugins
@@ -190,19 +179,7 @@ if($ENV{INSTALLCHECK_SBINDIR}) {
     $PLUGIN_PATH = "/xxx_does_not_exist";
 }
 else {
-    my $top_pdir = "$ENV{TOP_BUILDDIR}/plugins";
-    opendir(my $dh, $top_pdir) or die "Cannot open top plugins directory: $!";
-    $PLUGIN_PATH
-        = q{["}
-        . join(
-            q{","},
-            grep { -d $_ }
-             map { "$top_pdir/$_/.libs" }
-              grep { !/^\./ }
-               readdir($dh)
-        )
-        . q{"]};
-    closedir($dh);
+    $PLUGIN_PATH = "$ENV{TOP_BUILDDIR}/plugins/.libs";
     $EXTMON_HELPER_CFG = qq|extmon => { helper_path => "$EXTMON_BIN" }|;
 }
 
@@ -326,13 +303,9 @@ sub proc_tmpl {
     open(my $out_fh, '>', $outpath)
         or die "Cannot open test template output '$outpath' for writing: $!";
 
-    my $dns_lspec = $HAVE_V6
-        ? qq{[ 127.0.0.1, ::1 ]}
-        : qq{127.0.0.1};
+    my $dns_lspec = qq{[ 127.0.0.1, ::1 ]};
 
-    my $http_lspec = $HAVE_V6
-        ? qq{[ 127.0.0.1, ::1 ]}
-        : qq{127.0.0.1};
+    my $http_lspec = qq{[ 127.0.0.1, ::1 ]};
 
     my $std_opts = qq{
         listen => $dns_lspec
@@ -343,7 +316,15 @@ sub proc_tmpl {
         run_dir = $OUTDIR/run/gdnsd
         state_dir = $OUTDIR/var/lib/gdnsd
         realtime_stats = true
+        zones_rfc1035_quiesce = 1.02
     };
+
+    if($ENV{USE_ZONES_AUTO}) {
+        $std_opts .= qq{        zones_rfc1035_auto = true\n};
+    }
+    else {
+        $std_opts .= qq{        zones_rfc1035_auto = false\n};
+    }
 
     if($PRIVDROP_USER) {
         $std_opts .= qq{username = $PRIVDROP_USER\n};
@@ -417,7 +398,7 @@ sub spawn_daemon_setup {
 
     safe_rmtree($OUTDIR);
 
-    foreach my $d ($OUTDIR, "${OUTDIR}/etc", "${OUTDIR}/run", "${OUTDIR}/var", "${OUTDIR}/var/lib") {
+    foreach my $d ($OUTDIR, "${OUTDIR}/etc", "${OUTDIR}/run", "${OUTDIR}/var", "${OUTDIR}/var/lib", "${OUTDIR}/var/lib/gdnsd") {
         mkdir $d or die "Cannot create directory $d: $!";
     }
 
@@ -492,7 +473,7 @@ sub test_spawn_daemon {
     };
     unless(Test::More::ok(!$@ && $pid)) {
         Test::More::diag("Cannot spawn daemon: $@");
-        Test::More::BAIL_OUT($@);
+        die $@;
     }
 
     return $pid;
@@ -507,7 +488,7 @@ sub test_spawn_daemon_setup {
     };
     unless(Test::More::ok(!$@)) {
         Test::More::diag("Cannot setup daemon: $@");
-        Test::More::BAIL_OUT($@);
+        die $@;
     }
 }
 
@@ -523,7 +504,7 @@ sub test_spawn_daemon_execute {
     };
     unless(Test::More::ok(!$@ && $pid)) {
         Test::More::diag("Cannot spawn daemon: $@");
-        Test::More::BAIL_OUT($@);
+        die $@;
     }
 
     return $pid;
@@ -588,8 +569,12 @@ sub test_log_output {
 
 sub insert_altzone {
     my ($class, $fn, $destfn) = @_;
-    File::Copy::copy("$ALTZONES_IN/$fn", $OUTDIR . "/etc/zones/$destfn")
-        or die "Failed to copy alt zonefile '$fn' to 'etc/zones/$destfn': $!";
+    my $full_temp_fn = $OUTDIR . "/etc/zones/.mvtmp.$destfn";
+    my $full_dest_fn = $OUTDIR . "/etc/zones/$destfn";
+    File::Copy::copy("$ALTZONES_IN/$fn", $full_temp_fn)
+        or die "Failed to copy alt zonefile '$fn' to '$full_temp_fn': $!";
+    File::Copy::move($full_temp_fn, $full_dest_fn)
+        or die "Failed to move '$full_temp_fn' to '$full_dest_fn': $!";
 }
 
 sub delete_altzone {
@@ -619,8 +604,13 @@ my $_resolver6;
 sub get_resolver {
     return $_resolver ||= Net::DNS::Resolver->new(
         recurse => 0,
-        nameservers => [ '127.0.0.1'],
+        nameservers => [ '127.0.0.1' ],
         port => $DNS_PORT,
+        srcport => $DNS_SPORT4,
+        srcaddr => '127.0.0.1',
+        force_v4 => 1,
+        persistent_tcp => 1,
+        persistent_udp => 1,
         udp_timeout => 3,
         tcp_timeout => 3,
         retrans => 1,
@@ -631,8 +621,13 @@ sub get_resolver {
 sub get_resolver6 {
     return $_resolver6 ||= Net::DNS::Resolver->new(
         recurse => 0,
-        nameservers => [ '::1'],
+        nameservers => [ '::1' ],
         port => $DNS_PORT,
+        srcport => $DNS_SPORT6,
+        srcaddr => '::1',
+        force_v6 => 1,
+        persistent_tcp => 1,
+        persistent_udp => 1,
         udp_timeout => 3,
         tcp_timeout => 3,
         retrans => 1,
@@ -971,6 +966,8 @@ sub query_server {
         my $sock = $sockclass->new(
             PeerAddr => $ns,
             PeerPort => $port,
+            LocalPort => ($transport eq 'IPv6') ? $DNS_SPORT6 : $DNS_SPORT4,
+            ReuseAddr => 1,
             Proto => 'udp',
             Timeout => 10,
         );
@@ -1074,7 +1071,7 @@ sub test_dns {
         }
     }
 
-    if(!$args{v4_only} && $HAVE_V6) {
+    if(!$args{v4_only}) {
         for my $i (1 .. $args{rep}) {
             foreach my $stat (@{$args{stats}}) {
                 $stats_accum{$stat}++;
@@ -1112,14 +1109,18 @@ sub test_kill_daemon {
 
     if(!$pid) {
         Test::More::ok(0);
-        Test::More::BAIL_OUT("Test Bug: no pid specified?");
+        Test::More::diag("Test Bug: no pid specified?");
+        die "Test Bug: no pid specified?";
     }
 
     if(!kill(0, $pid)) {
         Test::More::ok(0);
-        Test::More::BAIL_OUT("Daemon at pid $pid was dead before we tried to shut it down");
+        Test::More::diag("Daemon at pid $pid was dead before we tried to shut it down");
+        die "Daemon at pid $pid was dead before we tried to shut it down";
     }
     else {
+        local $@ = undef;
+        my $diestr = "";
         eval {
             local $SIG{ALRM} = sub { die "Failed to kill daemon cleanly at pid $pid"; };
             alarm($TEST_RUNNER ? 60 : 30);
@@ -1127,10 +1128,26 @@ sub test_kill_daemon {
             waitpid($pid, 0);
         };
         if($@) {
+            $diestr = $@;
             kill('SIGKILL', $pid);
             waitpid($pid, 0);
-            Test::More::ok(0);
-            Test::More::BAIL_OUT($@);
+        }
+
+        if(WIFEXITED(${^CHILD_ERROR_NATIVE})) {
+            my $ev = WEXITSTATUS(${^CHILD_ERROR_NATIVE});
+            if($ev) {
+                Test::More::ok(0);
+                Test::More::diag("$diestr - Exit value was $ev");
+                die "$diestr - Exit value was $ev";
+            }
+        }
+        elsif(WIFSIGNALED(${^CHILD_ERROR_NATIVE})) {
+            my $s = WTERMSIG(${^CHILD_ERROR_NATIVE});
+            if($s != $SIGS{'TERM'}) {
+                Test::More::ok(0);
+                Test::More::diag("$diestr - Terminated by signal $s");
+                die "$diestr - Terminated by signal $s";
+            }
         }
     }
 

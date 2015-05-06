@@ -8,37 +8,33 @@
 /configure
 /libtool
 /stamp-h1
-
 # Distribution tarballs
 /gdnsd-*.tar.xz
 
 # Built, installed binaries
-/gdnsd/gdnsd
-/plugins/extmon/gdnsd_extmon_helper
-/plugins/meta/libgdmaps/t/gdnsd_geoip_test
+/src/gdnsd
+/plugins/gdnsd_extmon_helper
+/plugins/gdnsd_geoip_test
 
-# Built, distributed C sources (Ragel outputs)
-/gdnsd/zscan_rfc1035.c
-/gdnsd/libgdnsd/vscf.c
+# Built and not distributed or installed
+/src/zscan_rfc1035.c
+/libgdnsd/vscf.c
 
-# Built headers, not distributed
-/gdnsd/libgdnsd/cfg-dirs.h
-
-# Copied, renamed, distributed, installed
-/gdnsd/libgdnsd/gdnsd/dmn.h
+# Built and installed, but not distributed
+/libgdnsd/bopts.h
 
 # Testsuite input/output directories
-testout/
-testroot/
+/t/testout/
 
 # lcov html output from qa/coverage.sh
 /lcovout/
 
 # libgdmaps unit test junk
-/plugins/meta/libgdmaps/t/*.bin
-/plugins/meta/libgdmaps/t/Geo*.dat
-/plugins/meta/libgdmaps/t/regioncodes-*
-/plugins/meta/libgdmaps/t/LICENSE.txt
+/t/libgdmaps/*.t
+/t/libgdmaps/etc/
+
+# saved state for "prove"
+.prove
 
 # Various tool outputs in all dirs
 Makefile

@@ -1,4 +1,3 @@
-
 Building From Source
 ====================
 
@@ -10,21 +9,32 @@ If your starting point is a tarball, the following prerequisites apply:
 * A basically functional POSIX build environment with a C99 compiler
 * libev headers and libraries, version 4.x: distro pkg
   or http://software.schmorp.de/pkg/libev.html
-* Perl 5.8.1 or higher and the perl "pod2man" command for document
+* Ragel 6.x: http://www.complang.org/ragel/ (or distro package)
+* Perl 5.10.1 or higher and the perl "pod2man" command for document
   generation (this may be in the package perl-podlaters)
+
+The following are recommended but optional:
+
 * liburcu aka userspace-rcu headers and libraries. Use distro pkg or
-  http://lttng.org/urcu/ (optional, but important for performance!)
+  http://lttng.org/urcu/ (important for performance!)
+* libmaxminddb headers and libraries to enable MaxMind GeoIP2 database
+  support: https://github.com/maxmind/libmaxminddb/releases
+* libunwind headers and libraries. (for stacktrace on some fatals)
 
 The following have no real effect on the build or runtime, but are
 required in order to run the testsuite:
 
-* Perl modules: LWP 5.805+, Socket6, IO::Socket::INET6, HTTP::Daemon
+* Perl modules: JSON::PP, LWP 5.805+, Socket6, IO::Socket::INET6, HTTP::Daemon
+  (JSON::PP comes with Perl v5.13.9 and higher)
 
-If working directly from a git clone, you may also need:
+If working directly from a git clone:
 
 * autoconf (2.63+), automake(1.11.1+), and libtool(2.2.6+) packages
-* Ragel 6.x: http://www.complang.org/ragel/ (or distro package)
-* Start with "autoreconf -vi", then ./configure ...
+* If you want "make check" to run optional GeoIP-related unit tests which use
+  large compressed files, those are stored in a separate repo as a submodule.
+  You can bring them into your tree via: "git submodule update --init".
+  You will also need the 'xz' compression utility installed to unpack them.
+* Start with "autoreconf -vif", then ./configure ...
 
 Interesting / Non-standard autoconf options
 ===========================================
@@ -41,10 +51,10 @@ Interesting / Non-standard autoconf options
     autoconf's prefix at all; it will still pick e.g.
     "/usr/lib/systemd/system" even when --prefix is "/usr/local".
   If pkg-config and/or systemd do not exist and this is not set manually
-    the unit file is neither generated nor installed.
-  To disable the generation and installation of the unit file on systems
-    which have systemd software installed (but e.g. are not using it for
-    the init system), use --without-systemdsystemunitdir.
+    the unit file is generated, but not installed.
+  To disable the installation of the unit file on systems which have
+    systemd software installed (but e.g. are not using it for the init
+    system), use --without-systemdsystemunitdir
 
 --without-urcu
   Explicitly disable support for liburcu (falls back to pthread rwlocks)
@@ -62,7 +72,6 @@ Interesting / Non-standard autoconf options
     down evasive bugs.  If you just want debug symbols, put -g in CFLAGS.
 
 --with-testport=N
-  The test suite needs to be able to bind to 3 consecutive ports
-   on 127.0.0.1, starting with port N.  The default is 12345.  If
-   this conflicts with some existing service on your machine, change
-   it here.
+  The test suite needs to be able to bind to ~300 consecutive ports on
+    127.0.0.1 and ::1, starting with port N.  The default is 12345.  If this
+    conflicts with some existing service on your machine, change it here.

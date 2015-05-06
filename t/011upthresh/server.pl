@@ -1,4 +1,3 @@
-
 use HTTP::Daemon;
 use HTTP::Status;
 
@@ -33,4 +32,3 @@ while (my $c = $d->accept) {
     $c->close;
     undef($c);
 }
-
