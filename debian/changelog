@@ -1,3 +1,10 @@
+gdnsd (2.1.2-1) unstable; urgency=high
+
+  * New upstream stable release.
+    - Fixes FTBFS with newer pod2man, like in current sid.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Thu, 07 May 2015 00:40:19 +0300
+
 gdnsd (2.1.0-1) unstable; urgency=medium
 
   * New upstream release.
