@@ -5,11 +5,12 @@ gdnsd (2.2.0-1) unstable; urgency=medium
   * Add build-dependency on libunwind-dev for stacktraces on fatals.
   * Remove build-dep on geoip-database. It was only used for running the test
     suite, which now expects specific versions of the GeoIP databases.
+  * Remove XS-Testsuite header, obsolete since dpkg 1.17.11.
   * Add /var/lib/gdnsd to debian/dirs.
   * Add several security options to the systemd unit file, inherited from
     upstream's own unit file.
 
- -- Faidon Liambotis <paravoid@debian.org>  Sat, 25 Jul 2015 12:04:35 +0300
+ -- Faidon Liambotis <paravoid@debian.org>  Sat, 25 Jul 2015 12:18:34 +0300
 
 gdnsd (2.1.2-1) unstable; urgency=high
 
