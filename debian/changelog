@@ -5,8 +5,9 @@ gdnsd (2.2.0-1) unstable; urgency=medium
   * Add build-dependency on libunwind-dev for stacktraces on fatals.
   * Remove build-dep on geoip-database. It was only used for running the test
     suite, which now expects specific versions of the GeoIP databases.
+  * Add /var/lib/gdnsd to debian/dirs.
 
- -- Faidon Liambotis <paravoid@debian.org>  Sat, 25 Jul 2015 11:51:29 +0300
+ -- Faidon Liambotis <paravoid@debian.org>  Sat, 25 Jul 2015 11:53:52 +0300
 
 gdnsd (2.1.2-1) unstable; urgency=high
 
