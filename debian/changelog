@@ -3,8 +3,10 @@ gdnsd (2.2.0-1) unstable; urgency=medium
   * New upstream release.
   * Add build-dependency on libmaxminddb-dev for GeoIP2 support.
   * Add build-dependency on libunwind-dev for stacktraces on fatals.
+  * Remove build-dep on geoip-database. It was only used for running the test
+    suite, which now expects specific versions of the GeoIP databases.
 
- -- Faidon Liambotis <paravoid@debian.org>  Thu, 07 May 2015 02:59:31 +0300
+ -- Faidon Liambotis <paravoid@debian.org>  Sat, 25 Jul 2015 11:51:29 +0300
 
 gdnsd (2.1.2-1) unstable; urgency=high
 
