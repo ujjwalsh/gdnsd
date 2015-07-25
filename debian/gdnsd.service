@@ -8,6 +8,15 @@ Type=notify
 NotifyAccess=all
 ExecStart=/usr/sbin/gdnsd -f start
 ExecStop=/usr/sbin/gdnsd stop
+OOMScoreAdjust=-900
+
+# Stricter security environment:
+MountFlags=slave
+DevicePolicy=closed
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target
