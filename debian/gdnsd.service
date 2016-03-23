@@ -1,7 +1,11 @@
 [Unit]
 Description=gdnsd
+Documentation=man:gdnsd
 After=local-fs.target
 After=network.target
+
+[Install]
+WantedBy=multi-user.target
 
 [Service]
 Type=notify
@@ -17,6 +21,3 @@ PrivateDevices=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-
-[Install]
-WantedBy=multi-user.target
