@@ -10,8 +10,9 @@ gdnsd (2.2.3-1) unstable; urgency=medium
     key to debian/upstream/signing-key.asc and adjust debian/watch to check
     for the .asc.
   * Migrate from our own -dbg package to the automatic -dbgsym package.
+  * Adjust libunwind-dev's architecture set: drop ia64; add mipsel, mips64el.
 
- -- Faidon Liambotis <paravoid@debian.org>  Wed, 23 Mar 2016 05:04:47 +0200
+ -- Faidon Liambotis <paravoid@debian.org>  Wed, 23 Mar 2016 05:07:55 +0200
 
 gdnsd (2.2.0-1) unstable; urgency=medium
 
