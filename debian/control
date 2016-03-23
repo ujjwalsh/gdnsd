@@ -2,7 +2,7 @@ Source: gdnsd
 Section: net
 Priority: optional
 Maintainer: Faidon Liambotis <paravoid@debian.org>
-Build-Depends: debhelper (>= 9), dh-autoreconf, dh-systemd,
+Build-Depends: debhelper (>= 9.20160114), dh-autoreconf, dh-systemd,
  libltdl-dev, perl,
  ragel, libev-dev,
  liburcu-dev [linux-any],
@@ -29,22 +29,6 @@ Description: authoritative domain name server
  DNSSEC.
  .
  This package provides the core gdnsd daemon and basic plugins.
-
-Package: gdnsd-dbg
-Architecture: any
-Depends: gdnsd (= ${binary:Version}), ${misc:Depends}
-Section: debug
-Priority: extra
-Description: authoritative domain name server (debugging symbols)
- gdnsd is an Authoritative-only DNS server. The initial g stands for
- Geographic, as gdnsd offers a plugin system for geographic (or other sorts of)
- balancing, redirection, and service-state-conscious failover.
- .
- gdnsd has a strong focus on high performance, low latency service. It does
- not offer any form of caching or recursive service, and does not support
- DNSSEC.
- .
- This package provides the debugging symbols for gdnsd.
 
 Package: gdnsd-dev
 Architecture: all
