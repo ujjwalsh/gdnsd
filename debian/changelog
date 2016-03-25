@@ -1,3 +1,10 @@
+gdnsd (2.2.3-2) unstable; urgency=medium
+
+  * Disable building with liburcu on powerpc architectures, as this currently
+    FTBFS on POWER8 systems due to what's likely a liburcu or kernel bug.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Fri, 25 Mar 2016 19:28:34 +0200
+
 gdnsd (2.2.3-1) unstable; urgency=medium
 
   * New upstream release.

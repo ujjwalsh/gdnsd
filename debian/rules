@@ -1,12 +1,19 @@
 #!/usr/bin/make -f
-# Uncomment this to turn on verbose mode.
+
 #export DH_VERBOSE=1
+
+include /usr/share/dpkg/architecture.mk
 
 # This has to be exported to make some magic below work.
 export DH_OPTIONS
 
 ifneq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
-	DEBUG += --enable-developer
+	EXTRA_CONFIGURE += --enable-developer
+endif
+
+# workaround FTBFS, test suite getting stuck/deadlocked
+ifneq (,$(filter $(DEB_HOST_ARCH), powerpc ppc64 ppc64el))
+	EXTRA_CONFIGURE += --without-urcu
 endif
 
 %:
@@ -15,7 +22,7 @@ endif
 override_dh_auto_configure:
 	dh_auto_configure -- \
 		--disable-silent-rules \
-		$(DEBUG)
+		$(EXTRA_CONFIGURE)
 
 override_dh_strip:
 	dh_strip --dbgsym-migration='gdnsd-dbg (<< 2.2.3-1~)'
