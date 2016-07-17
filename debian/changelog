@@ -4,6 +4,9 @@ gdnsd (2.2.4-1) unstable; urgency=medium
   * Build-Depend on libmaxminddb >= 1.2.0. This is not strictly needed, but
     building with lower versions means that we depened on the library's
     internals which are known to not be ABI-safe with newer versions.
+  * Address incompatibility with newer versions of Net::DNS (libnet-dns-perl).
+    Net::DNS::RR:SIG was found in the system copy, but others like
+    Net::DNS::RR:NXT were not, resulting in an FTBFS. (Closes: #830184)
   * Bump Standards-Version to 3.9.8.
   * Pass -O--dbgsym-migration to dh_strip and relax the debhelper dependency
     to ease backports.
