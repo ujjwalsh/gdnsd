@@ -5,6 +5,8 @@ gdnsd (2.2.4-1) unstable; urgency=medium
     building with lower versions means that we depened on the library's
     internals which are known to not be ABI-safe with newer versions.
   * Bump Standards-Version to 3.9.8.
+  * Pass -O--dbgsym-migration to dh_strip and relax the debhelper dependency
+    to ease backports.
 
  -- Faidon Liambotis <paravoid@debian.org>  Sun, 17 Jul 2016 19:43:30 +0300
 
