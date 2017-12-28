@@ -34,7 +34,6 @@ Package: gdnsd-dev
 Architecture: all
 Depends: ${misc:Depends}
 Section: libdevel
-Priority: extra
 Description: authoritative domain name server (development files)
  gdnsd is an Authoritative-only DNS server. The initial g stands for
  Geographic, as gdnsd offers a plugin system for geographic (or other sorts of)
