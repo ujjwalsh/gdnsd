@@ -2,7 +2,7 @@ Source: gdnsd
 Section: net
 Priority: optional
 Maintainer: Faidon Liambotis <paravoid@debian.org>
-Build-Depends: debhelper (>= 9), dh-autoreconf, dh-systemd,
+Build-Depends: debhelper (>= 11),
  libltdl-dev, perl,
  ragel, libev-dev,
  liburcu-dev [linux-any],

@@ -10,7 +10,7 @@ ifneq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
 endif
 
 %:
-	dh $@ --with autoreconf,systemd
+	dh $@
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
