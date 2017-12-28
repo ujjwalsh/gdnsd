@@ -135,10 +135,19 @@ static void udp_sock_opts_v6(const int sock) {
     if(setsockopt(sock, SOL_IPV6, IPV6_MTU_DISCOVER, &mtu_type, sizeof (mtu_type)) == -1)
         log_fatal("Failed to disable Path MTU Discovery for UDP socket: %s", dmn_logf_errno());
 #endif
+
 #if defined IPV6_DONTFRAG
+    // There have been reports in https://github.com/gdnsd/gdnsd/issues/115 of
+    // the IPV6_DONTFRAG setsockopt failing within the context of some
+    // OpenVZ+Debian environments.
+    // RFC 3542 says "By default, this socket option is disabled", so what
+    // we're doing here is just reinforcing the default as a sanity-check
+    // against bad defaults.
+    // Therefore, we'll merely warn rather than fatal on this, in hopes it
+    // clears up whatever's wrong with these OpenVZ environments.
     const int opt_zero = 0;
     if(setsockopt(sock, SOL_IPV6, IPV6_DONTFRAG, &opt_zero, sizeof (opt_zero)) == -1)
-        log_fatal("Failed to disable DF bit for UDP socket: %s", dmn_logf_errno());
+        log_warn("Failed to disable DF bit for UDP socket: %s", dmn_logf_errno());
 #endif
 
 #if defined IPV6_RECVPKTINFO
@@ -154,7 +163,7 @@ static void udp_sock_opts_v6(const int sock) {
 #if defined IPV6_TCLASS && defined IPTOS_LOWDELAY
     const int opt_tos = IPTOS_LOWDELAY;
     if(setsockopt(sock, SOL_IPV6, IPV6_TCLASS, &opt_tos, sizeof opt_tos) == -1)
-        log_fatal("Failed to set IPTOS_LOWDELAY on UDP socket: %s", dmn_logf_errno());
+        log_warn("Failed to set IPTOS_LOWDELAY on UDP socket: %s", dmn_logf_errno());
 #endif
 }
 
@@ -166,7 +175,6 @@ static void negotiate_udp_buffer(int sock, int which, const unsigned pktsize, co
     dmn_assert(pktsize <= 65536);
     dmn_assert(width > 0);
     dmn_assert(width <= 64);
-    dmn_assert(asin);
 
     // Our default desired buffer.  This is based on enough room for
     //   recv_width * 8 packets.  recv_width is counted as "4" if less than 4
@@ -198,7 +206,7 @@ static void negotiate_udp_buffer(int sock, int which, const unsigned pktsize, co
             else if(opt_size > min_buf)
                 opt_size = min_buf;
             else
-                log_fatal("Failed to set %s to %u for UDP socket %s: %s.  You may need to reduce the max_edns_response and/or udp_recv_width, or specify workable buffer sizes explicitly in the config", which_str, opt_size, dmn_logf_anysin(asin), dmn_logf_errno());
+                log_fatal("Failed to set %s to %i for UDP socket %s: %s.  You may need to reduce the max_edns_response and/or udp_recv_width, or specify workable buffer sizes explicitly in the config", which_str, opt_size, dmn_logf_anysin(asin), dmn_logf_errno());
         }
     }
 
@@ -208,8 +216,6 @@ static void negotiate_udp_buffer(int sock, int which, const unsigned pktsize, co
 }
 
 void udp_sock_setup(dns_thread_t* t) {
-    dmn_assert(t);
-
     dns_addr_t* addrconf = t->ac;
     dmn_assert(addrconf);
 
@@ -241,7 +247,7 @@ void udp_sock_setup(dns_thread_t* t) {
     if(addrconf->udp_rcvbuf) {
         int opt_size = (int)addrconf->udp_rcvbuf;
         if(setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &opt_size, sizeof(opt_size)) == -1)
-            log_fatal("Failed to set SO_RCVBUF to %u for UDP socket %s: %s", opt_size,
+            log_fatal("Failed to set SO_RCVBUF to %i for UDP socket %s: %s", opt_size,
                 dmn_logf_anysin(asin), dmn_logf_errno());
     }
     else {
@@ -251,7 +257,7 @@ void udp_sock_setup(dns_thread_t* t) {
     if(addrconf->udp_sndbuf) {
         int opt_size = (int)addrconf->udp_sndbuf;
         if(setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &opt_size, sizeof(opt_size)) == -1)
-            log_fatal("Failed to set SO_SNDBUF to %u for UDP socket %s: %s", opt_size,
+            log_fatal("Failed to set SO_SNDBUF to %i for UDP socket %s: %s", opt_size,
                 dmn_logf_anysin(asin), dmn_logf_errno());
     }
     else {
@@ -279,8 +285,6 @@ static unsigned get_pgsz(void) {
 
 F_HOT F_NORETURN F_NONNULL
 static void mainloop(const int fd, void* dnsp_ctx, dnspacket_stats_t* stats, const bool use_cmsg) {
-    dmn_assert(stats);
-
     const unsigned cmsg_size = use_cmsg ? CMSG_BUFSIZE : 1U;
     const unsigned pgsz = get_pgsz();
     const unsigned max_rounded = ((gcfg->max_response + pgsz - 1) / pgsz) * pgsz;
@@ -320,7 +324,7 @@ static void mainloop(const int fd, void* dnsp_ctx, dnspacket_stats_t* stats, con
         if(likely(is_online)) {
             gdnsd_prcu_rdr_quiesce();
             recvmsg_rv = recvmsg(fd, &msg_hdr, 0);
-            if(unlikely(recvmsg_rv < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))) {
+            if(unlikely(recvmsg_rv < 0 && ERRNO_WOULDBLOCK)) {
                 gdnsd_prcu_rdr_offline();
                 is_online = false;
                 (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tmout_inf, sizeof(tmout_inf));
@@ -376,8 +380,6 @@ static bool has_mmsg(void) {
 
 F_HOT F_NORETURN F_NONNULL
 static void mainloop_mmsg(const unsigned width, const int fd, void* dnsp_ctx, dnspacket_stats_t* stats, const bool use_cmsg) {
-    dmn_assert(stats);
-
     const unsigned cmsg_size = use_cmsg ? CMSG_BUFSIZE : 1U;
 
     // gcfg->max_response, rounded up to the next nearest multiple of the page size
@@ -423,7 +425,7 @@ static void mainloop_mmsg(const unsigned width, const int fd, void* dnsp_ctx, dn
         if(likely(is_online)) {
             gdnsd_prcu_rdr_quiesce();
             mmsg_rv = recvmmsg(fd, dgrams, width, MSG_WAITFORONE, NULL);
-            if(unlikely(mmsg_rv < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))) {
+            if(unlikely(mmsg_rv < 0 && ERRNO_WOULDBLOCK)) {
                 gdnsd_prcu_rdr_offline();
                 is_online = false;
                 (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tmout_inf, sizeof(tmout_inf));
@@ -505,7 +507,6 @@ static bool has_mmsg(void) { return false; }
 //  as well as the IPv4 any-address (for correct source address).
 F_NONNULL F_PURE
 static bool needs_cmsg(const dmn_anysin_t* asin) {
-    dmn_assert(asin);
     dmn_assert(asin->sa.sa_family == AF_INET6 || asin->sa.sa_family == AF_INET);
     return (asin->sa.sa_family == AF_INET6 || dmn_anysin_is_anyaddr(asin))
         ? true
@@ -514,8 +515,6 @@ static bool needs_cmsg(const dmn_anysin_t* asin) {
 
 F_NORETURN
 void* dnsio_udp_start(void* thread_asvoid) {
-    dmn_assert(thread_asvoid);
-
     gdnsd_thread_setname("gdnsd-io-udp");
 
     const dns_thread_t* t = thread_asvoid;

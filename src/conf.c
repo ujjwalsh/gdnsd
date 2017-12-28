@@ -57,19 +57,20 @@ static const cfg_t cfg_defaults = {
     .zones_strict_data = false,
     .zones_strict_startup = true,
     .zones_rfc1035_auto = true,
-    .chaos_len = 0,
+    .any_mitigation = true,
      // legal values are -20 to 20, so -21
      //  is really just an indicator that the user
      //  didn't explicitly set it.  The default
      //  behavior is dynamic...
     .priority = -21,
+    .chaos_len = 0,
     .zones_default_ttl = 86400U,
     .max_ncache_ttl = 10800U,
     .max_ttl = 3600000U,
     .min_ttl = 5U,
     .log_stats = 3600U,
-    .max_edns_response = 1410U,
     .max_response = 16384U,
+    .max_edns_response = 1410U,
     .max_cname_depth = 16U,
     .max_addtl_rrsets = 64U,
     .zones_rfc1035_auto_interval = 31U,
@@ -78,8 +79,6 @@ static const cfg_t cfg_defaults = {
 
 F_NONNULL
 static void set_chaos(cfg_t* cfg, const char* data) {
-    dmn_assert(data);
-
     const unsigned dlen = strlen(data);
     if(dlen > 254)
         log_fatal("Option 'chaos_response' must be a string less than 255 characters long");
@@ -102,15 +101,12 @@ static void plugins_cleanup(void) {
 // Generic iterator for catching bad config hash keys in various places below
 F_NONNULL
 static bool bad_key(const char* key, unsigned klen V_UNUSED, vscf_data_t* d V_UNUSED, const void* which_asvoid) {
-    dmn_assert(key); dmn_assert(d); dmn_assert(which_asvoid);
     const char* which = which_asvoid;
     log_fatal("Invalid %s key '%s'", which, key);
 }
 
 F_NONNULLX(2)
 static void plugin_load_and_configure(const unsigned num_dns_threads, const char* name, vscf_data_t* pconf) {
-    dmn_assert(name);
-
     if(pconf && !vscf_is_hash(pconf))
         log_fatal("Config data for plugin '%s' must be a hash", name);
 
@@ -123,7 +119,6 @@ static void plugin_load_and_configure(const unsigned num_dns_threads, const char
 
 F_NONNULL
 static bool load_plugin_iter(const char* name, unsigned namelen V_UNUSED, vscf_data_t* pconf, const void* scfg_asvoid) {
-    dmn_assert(name); dmn_assert(pconf); dmn_assert(scfg_asvoid);
     const socks_cfg_t* socks_cfg = scfg_asvoid;
     plugin_load_and_configure(socks_cfg->num_dns_threads, name, pconf);
     return true;
@@ -138,16 +133,6 @@ static bool load_plugin_iter(const char* name, unsigned namelen V_UNUSED, vscf_d
         if(_opt_setting) { \
             if(!vscf_is_simple(_opt_setting) \
             || !vscf_simple_get_as_bool(_opt_setting, &cfg->_gconf_loc)) \
-                log_fatal("Config option %s: Value must be 'true' or 'false'", #_gconf_loc); \
-        } \
-    } while(0)
-
-#define CFG_OPT_BOOL_ALTSTORE(_opt_set, _gconf_loc, _store) \
-    do { \
-        vscf_data_t* _opt_setting = vscf_hash_get_data_byconstkey(_opt_set, #_gconf_loc, true); \
-        if(_opt_setting) { \
-            if(!vscf_is_simple(_opt_setting) \
-            || !vscf_simple_get_as_bool(_opt_setting, &_store)) \
                 log_fatal("Config option %s: Value must be 'true' or 'false'", #_gconf_loc); \
         } \
     } while(0)
@@ -208,34 +193,6 @@ static bool load_plugin_iter(const char* name, unsigned namelen V_UNUSED, vscf_d
         } \
     } while(0)
 
-#define CFG_OPT_UINT_ALTSTORE(_opt_set, _gconf_loc, _min, _max, _store) \
-    do { \
-        vscf_data_t* _opt_setting = vscf_hash_get_data_byconstkey(_opt_set, #_gconf_loc, true); \
-        if(_opt_setting) { \
-            unsigned long _val; \
-            if(!vscf_is_simple(_opt_setting) \
-            || !vscf_simple_get_as_ulong(_opt_setting, &_val)) \
-                log_fatal("Config option %s: Value must be a positive integer", #_gconf_loc); \
-            if(_val < _min || _val > _max) \
-                log_fatal("Config option %s: Value out of range (%lu, %lu)", #_gconf_loc, _min, _max); \
-            _store = (unsigned) _val; \
-        } \
-    } while(0)
-
-#define CFG_OPT_UINT_ALTSTORE_NOMIN(_opt_set, _gconf_loc, _max, _store) \
-    do { \
-        vscf_data_t* _opt_setting = vscf_hash_get_data_byconstkey(_opt_set, #_gconf_loc, true); \
-        if(_opt_setting) { \
-            unsigned long _val; \
-            if(!vscf_is_simple(_opt_setting) \
-            || !vscf_simple_get_as_ulong(_opt_setting, &_val)) \
-                log_fatal("Config option %s: Value must be a positive integer", #_gconf_loc); \
-            if(_val > _max) \
-                log_fatal("Config option %s: Value out of range (0, %lu)", #_gconf_loc, _max); \
-            _store = (unsigned) _val; \
-        } \
-    } while(0)
-
 #define CFG_OPT_STR(_opt_set, _gconf_loc) \
     do { \
         vscf_data_t* _opt_setting = vscf_hash_get_data_byconstkey(_opt_set, #_gconf_loc, true); \
@@ -257,7 +214,7 @@ static bool load_plugin_iter(const char* name, unsigned namelen V_UNUSED, vscf_d
     } while(0)
 
 cfg_t* conf_load(const vscf_data_t* cfg_root, const socks_cfg_t* socks_cfg, const bool force_zss, const bool force_zsd) {
-    dmn_assert(!cfg_root || vscf_is_hash(cfg_root)); dmn_assert(socks_cfg);
+    dmn_assert(!cfg_root || vscf_is_hash(cfg_root));
 
     cfg_t* cfg = xmalloc(sizeof(*cfg));
     memcpy(cfg, &cfg_defaults, sizeof(*cfg));
@@ -274,6 +231,7 @@ cfg_t* conf_load(const vscf_data_t* cfg_root, const socks_cfg_t* socks_cfg, cons
         CFG_OPT_BOOL(options, lock_mem);
         CFG_OPT_BOOL(options, disable_text_autosplit);
         CFG_OPT_BOOL(options, edns_client_subnet);
+        CFG_OPT_BOOL(options, any_mitigation);
         CFG_OPT_UINT_NOMIN(options, log_stats, 86400LU);
 
         CFG_OPT_UINT(options, zones_default_ttl, 1LU, 2147483647LU);

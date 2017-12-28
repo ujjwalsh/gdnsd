@@ -608,6 +608,28 @@ and are used to communicate persistent, stateful information to
 the daemon.  This should live on a filesystem which is preserved
 across reboots.
 
+=item B<any_mitigation>
+
+Boolean, default true.  If true, the server will attempt to mitigate
+problems with ANY-query reflection attacks over UDP.  As ANY queries
+tend to have the largest response sizes, they are an obvious target for
+amplified reflection attacks using gdnsd as the traffic source.  ANY
+queries aren't commonly used by legitimate clients; they're mostly for
+debugging.
+
+Currently gdnsd's only mechanism for mitigation is forcing legitimate
+clients to use TCP for ANY queries by sending a truncated UDP response.
+Truncation responses are a normal expectation regardless, and supporting
+DNS over TCP is a requirement of the DNS.  Therefore this should cause
+no real-world performance or interoperability problems in exchange for
+the protection it offers.
+
+In future releases, C<any_mitigation> may behave differently and allow
+some ANY-over-UDP traffic to succeed when it's safe to do so.  For
+example, it may allow ANY over UDP up to a certain response ratelimit,
+and/or it may allow ANY over UDP when the request source is weakly
+validated by an edns0 cookie.
+
 =back
 
 =head1 SERVICE_TYPES
@@ -952,15 +974,25 @@ Example 3 (compressed and ugly):
 
 vscf now has a mechanism for config includefiles.  The syntax is
 
-  $include{filename}
+  $include{dir/file} # single file must exist
+  $include{dir/*}   # not ok if no matching files
+  $include{dir}     # ok if no files in dir
 
-where C<filename> can use the same kinds of escaping and/or
-double-quoting as normal scalar string data.  Whitespace between
-the filename and the surrounding brackets is optional.  Whitespace
-between C<$include> and the following C<{> is not allowed.  If the filename
-is relative (does not begin with F</>), it is interpreted as
-relative to the directory containing the parent file.  Include files
-can nest other include files to arbitrary depth.
+where the path can use the same kinds of escaping and/or double-quoting
+as normal scalar string data.  Whitespace between the path and the
+surrounding brackets is optional.  Whitespace between C<$include> and
+the following C<{> is not allowed.  If the path is relative (does not
+begin with F</>), it is interpreted as relative to the directory
+containing the parent file.  Includes can nest other includes to
+arbitrary depth.
+
+The path is normally treated as a glob, allowing the inclusion of
+multiple files.  When used as a glob, there must be at least one match -
+it will be an error if there are no matching files.  However, if C<path>
+is not a glob and names an B<existing> directory explicitly, it will be
+treated like it was a glob of all files within that directory by
+appending C</*>, and it will not be an error if there are no files
+within that directory (no matches for the glob).
 
 Keep in mind that at the top level of any given vscf file (even
 include files), the file must syntactically be either an implicit
@@ -978,7 +1010,8 @@ hand side of a hash map entry or a member of an array) with its own
 contents, which are either a hash or an array.  Note that there is no
 mechanism for flattening an include-file's array into the parent array
 (the whole included array would be a single array item within the parent
-array).  Examples:
+array).  Also, including multiple files in a single statement (directory
+name or glob pattern) are not allowed in value context.  Examples:
 
   main config:
     options => { listen => $include{foo} }
@@ -1003,13 +1036,16 @@ not allowed. Example:
     options => { ... },
     plugins => {
         extmon => { ... },
-        metafo => { ... },
-        $include{geoip_cfg},
-        simplefo => { ... }
+        $include{geoip.cfg},
+        $include{plugins.d},
     }
-  geoip_cfg:
-    geoip => { ... },
+  geoip.cfg:
+    geoip => { ... }
+  plugins.d/foo:
     weighted => { ... }
+    simplefo => { ... }
+  plugins.d/bar:
+    metafo => { ... }
 
 =back
 

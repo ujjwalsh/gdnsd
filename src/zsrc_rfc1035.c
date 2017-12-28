@@ -78,7 +78,7 @@ static inot_data inot;
 
 #endif
 
-char* rfc1035_dir = NULL;
+static char* rfc1035_dir = NULL;
 
 // POSIX states that inode+dev uniquely identifies a file on
 //   a given system.  Therefore those + mtime should uniquely
@@ -144,7 +144,6 @@ static void* const ZFILE_DELETED = (void*)(uintptr_t)0x1;
 
 F_NONNULL
 static void zf_delete(zfile_t* zf) {
-    dmn_assert(zf);
     if(zf->zone)
         zone_delete(zf->zone);
     if(zf->full_fn)
@@ -154,9 +153,8 @@ static void zf_delete(zfile_t* zf) {
     free(zf);
 }
 
+F_NONNULL
 static void statcmp_set(const char* full_fn, statcmp_t* out) {
-    dmn_assert(full_fn); dmn_assert(out);
-
     struct stat st;
     int lstat_rv = lstat(full_fn, &st);
     if(likely(!lstat_rv && S_ISREG(st.st_mode))) {
@@ -212,7 +210,6 @@ static void zfhash_grow(void) {
 // called must use zfhash_find() first!
 F_NONNULL
 static void zfhash_add(zfile_t* zf) {
-    dmn_assert(zf);
     dmn_assert(zf->fn);
     dmn_assert(zf->full_fn);
 
@@ -233,7 +230,6 @@ static void zfhash_add(zfile_t* zf) {
 
 F_NONNULL
 static void zfhash_del(zfile_t* zf) {
-    dmn_assert(zf);
     dmn_assert(zf->fn);
     dmn_assert(zf->full_fn);
 
@@ -253,8 +249,6 @@ static void zfhash_del(zfile_t* zf) {
 
 F_NONNULL F_PURE
 static zfile_t* zfhash_find(const char* zfn) {
-    dmn_assert(zfn);
-
     if(likely(zfhash_alloc)) {
         const unsigned zfn_hash = gdnsd_lookup2((const uint8_t*)zfn, strlen(zfn));
         const unsigned hash_mask = zfhash_alloc - 1;
@@ -274,8 +268,6 @@ static zfile_t* zfhash_find(const char* zfn) {
 
 F_NONNULL
 static char* make_zone_name(const char* zf_name) {
-    dmn_assert(zf_name);
-
     unsigned zf_name_len = strlen(zf_name);
     char* out = NULL;
 
@@ -306,7 +298,7 @@ static char* make_zone_name(const char* zf_name) {
 
 F_NONNULL
 static zone_t* zone_from_zf(zfile_t* zf, bool* retry_me) {
-    dmn_assert(zf); dmn_assert(retry_me); dmn_assert(!*retry_me);
+    dmn_assert(!*retry_me);
 
     char* name = make_zone_name(zf->fn);
     if(!name)
@@ -332,8 +324,6 @@ static zone_t* zone_from_zf(zfile_t* zf, bool* retry_me) {
 
 F_NONNULL
 static void quiesce_check(struct ev_loop* loop, ev_timer* timer, int revents V_UNUSED) {
-    dmn_assert(loop);
-    dmn_assert(timer);
     dmn_assert(revents == EV_TIMER);
 
     zfile_t* zf = timer->data;
@@ -417,9 +407,6 @@ static void quiesce_check(struct ev_loop* loop, ev_timer* timer, int revents V_U
 //     files based on whether stat() data changed before taking any action.
 F_NONNULL
 static void process_zonefile(const char* zfn, struct ev_loop* loop, const double initial_quiesce_time, const bool verify_statcmp) {
-    dmn_assert(zfn);
-    dmn_assert(loop);
-
     const char* fn;
     char* full_fn = gdnsd_str_combine(rfc1035_dir, zfn, &fn);
 
@@ -491,17 +478,18 @@ static void scan_dir(struct ev_loop* loop, double initial_quiesce_time) {
         log_err("rfc1035: Cannot open zones directory '%s': %s", rfc1035_dir, dmn_logf_strerror(errno));
     }
     else {
-        const size_t bufsz = gdnsd_dirent_bufsize(zdhandle, rfc1035_dir);
-        struct dirent* buf = xmalloc(bufsz);
         struct dirent* result = NULL;
         do {
-            if(readdir_r(zdhandle, buf, &result))
-                log_fatal("rfc1035: readdir_r(%s) failed: %s", rfc1035_dir, dmn_logf_errno());
-            if(likely(result))
+            errno = 0;
+            result = readdir(zdhandle);
+            if(likely(result)) {
                 if(result->d_name[0] != '.')
                     process_zonefile(result->d_name, loop, initial_quiesce_time, true);
+            }
+            else if(errno) {
+                log_fatal("rfc1035: readdir_r(%s) failed: %s", rfc1035_dir, dmn_logf_errno());
+            }
         } while(result);
-        free(buf);
         if(closedir(zdhandle))
             log_err("rfc1035: closedir(%s) failed: %s", rfc1035_dir, dmn_logf_strerror(errno));
     }
@@ -515,7 +503,6 @@ static void scan_dir(struct ev_loop* loop, double initial_quiesce_time) {
 //  process_zonefile() to be picked up as deletions.
 F_NONNULL
 static void check_missing(struct ev_loop* loop) {
-    dmn_assert(loop);
     dmn_assert(generation);
 
     for(unsigned i = 0; i < zfhash_alloc; i++) {
@@ -531,7 +518,6 @@ static void check_missing(struct ev_loop* loop) {
 
 F_NONNULL
 static void do_scandir(struct ev_loop* loop) {
-    dmn_assert(loop);
     generation++;
     scan_dir(loop, full_quiesce);
     check_missing(loop);
@@ -539,8 +525,6 @@ static void do_scandir(struct ev_loop* loop) {
 
 F_NONNULL
 static void periodic_scan(struct ev_loop* loop, ev_timer* rtimer V_UNUSED, int revents V_UNUSED) {
-    dmn_assert(loop);
-    dmn_assert(rtimer);
     dmn_assert(revents == EV_TIMER);
     do_scandir(loop);
 }
@@ -646,7 +630,6 @@ static void inotify_initial_setup(void) {
 
 F_NONNULL
 static void initial_run(struct ev_loop* loop) {
-    dmn_assert(loop);
     if(!inotify_initial_failure) {
         dmn_assert(inot.io_watcher);
         ev_io_start(loop, inot.io_watcher);
@@ -660,8 +643,6 @@ static void initial_run(struct ev_loop* loop) {
 
 F_NONNULL
 static void inotify_fallback_scan(struct ev_loop* loop, ev_timer* rtimer, int revents) {
-    dmn_assert(loop);
-    dmn_assert(rtimer);
     dmn_assert(revents == EV_TIMER);
     dmn_assert(!inotify_initial_failure);
 
@@ -676,7 +657,6 @@ static void inotify_fallback_scan(struct ev_loop* loop, ev_timer* rtimer, int re
 
 F_NONNULL
 static void handle_inotify_failure(struct ev_loop* loop) {
-    dmn_assert(loop);
     dmn_assert(!inotify_initial_failure);
 
     log_warn("rfc1035: inotify failed, using fallback scandir() method until recovery");
@@ -698,7 +678,6 @@ static void handle_inotify_failure(struct ev_loop* loop) {
 //   place and/or moving open files around while they're being written to.
 F_NONNULLX(1)
 static bool inot_process_event(struct ev_loop* loop, const char* fname, uint32_t emask) {
-    dmn_assert(loop);
     dmn_assert(!inotify_initial_failure);
 
     bool rv = false;
@@ -732,7 +711,7 @@ static bool inot_process_event(struct ev_loop* loop, const char* fname, uint32_t
 }
 
 static void inot_reader(struct ev_loop* loop, ev_io* w, int revents V_UNUSED) {
-    dmn_assert(loop); dmn_assert(w); dmn_assert(revents == EV_READ);
+    dmn_assert(revents == EV_READ);
     dmn_assert(!inotify_initial_failure);
 
     uint8_t evtbuf[inotify_bufsize];
@@ -740,7 +719,7 @@ static void inot_reader(struct ev_loop* loop, ev_io* w, int revents V_UNUSED) {
     while(1) {
         ssize_t read_rv = read(w->fd, evtbuf, inotify_bufsize);
         if(read_rv < 1) {
-            if(!read_rv || (errno != EAGAIN && errno != EWOULDBLOCK)) {
+            if(!read_rv || !ERRNO_WOULDBLOCK) {
                 if(read_rv)
                     log_err("rfc1035: read() of inotify file descriptor failed: %s", dmn_logf_errno());
                 else
@@ -778,7 +757,6 @@ static void inotify_initial_setup(void) { }
 
 F_NONNULL
 static void initial_run(struct ev_loop* loop) {
-    dmn_assert(loop);
     reload_timer = xcalloc(1, sizeof(*reload_timer));
     ev_timer_init(reload_timer, periodic_scan, gcfg->zones_rfc1035_auto_interval, gcfg->zones_rfc1035_auto_interval);
     ev_timer_start(loop, reload_timer);
@@ -827,7 +805,6 @@ static ev_async* sigusr1_waker = NULL;
 // called within our thread/loop to take sigusr1 action
 F_NONNULL
 static void sigusr1_cb(struct ev_loop* loop, ev_async* w V_UNUSED, int revents V_UNUSED) {
-    dmn_assert(loop); dmn_assert(w);
     log_info("rfc1035: received SIGUSR1 notification, scanning for changes...");
     do_scandir(loop);
 }
@@ -839,8 +816,6 @@ void zsrc_rfc1035_sigusr1(void) {
 }
 
 void zsrc_rfc1035_runtime_init(struct ev_loop* loop) {
-    dmn_assert(loop);
-
     zones_loop = loop;
     sigusr1_waker = xmalloc(sizeof(*sigusr1_waker));
     ev_async_init(sigusr1_waker, sigusr1_cb);

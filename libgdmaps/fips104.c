@@ -26,6 +26,7 @@
 #include <gdnsd/dmn.h>
 #include <gdnsd/log.h>
 #include <gdnsd/paths.h>
+#include <gdnsd/misc.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -53,27 +54,16 @@ struct _fips_t {
 
 // keys are a uint32_t made of 4 bytes: CCRR (Country/Region)
 F_CONST
-static unsigned fips_djb_hash(uint32_t key) {
+static unsigned fips_hash(uint32_t key) {
    dmn_assert(key);
-
-   unsigned hash = 5381U;
-   hash = (hash * 33) ^ (key & 0xFFU);
-   hash = (hash * 33) ^ ((key & 0xFF00U) >> 8U);
-   hash = (hash * 33) ^ ((key & 0xFF0000U) >> 16U);
-   hash = (hash * 33) ^ ((key & 0xFF000000U) >> 24U);
-
-   return hash & FIPS_HASH_MASK;
+   return gdnsd_lookup2((const uint8_t*)&key, 4) & FIPS_HASH_MASK;
 }
 
 // It is assumed there are no duplicates in the input data.
 F_NONNULL
 static void fips_hash_add(fips_t* fips, const uint32_t key, const char* val) {
-    dmn_assert(fips);
-    dmn_assert(key);
-    dmn_assert(val);
-
     unsigned jmpby = 1;
-    unsigned slotnum = fips_djb_hash(key);
+    unsigned slotnum = fips_hash(key);
     while(fips->table[slotnum].key)
         slotnum = (slotnum + jmpby++) & FIPS_HASH_MASK;
     fips->table[slotnum].key = key;
@@ -82,8 +72,6 @@ static void fips_hash_add(fips_t* fips, const uint32_t key, const char* val) {
 
 F_NONNULL
 static void fips_parse(fips_t* fips, FILE* file) {
-    dmn_assert(fips); dmn_assert(file);
-
     unsigned line = 0;
     while(1) {
         char ccrr[5];
@@ -111,11 +99,10 @@ static void fips_parse(fips_t* fips, FILE* file) {
 /**** public interface ****/
 
 const char* fips_lookup(const fips_t* fips, const uint32_t key) {
-    dmn_assert(fips);
     dmn_assert(key);
 
     unsigned jmpby = 1;
-    unsigned slotnum = fips_djb_hash(key);
+    unsigned slotnum = fips_hash(key);
     while(fips->table[slotnum].key) {
         if(fips->table[slotnum].key == key)
             return fips->table[slotnum].val;
@@ -126,8 +113,6 @@ const char* fips_lookup(const fips_t* fips, const uint32_t key) {
 }
 
 fips_t* fips_init(const char* pathname) {
-    dmn_assert(pathname);
-
     FILE* file = fopen(pathname, "r");
     if(!file)
         log_fatal("plugin_geoip: Cannot fopen() FIPS region file '%s' for reading: %s", pathname, dmn_logf_errno());

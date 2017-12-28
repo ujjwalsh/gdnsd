@@ -81,6 +81,7 @@ typedef struct {
     union {
         uint8_t eml_dname[256];
         char    rhs_dyn[256];
+        char    caa_prop[256];
     };
     uint8_t** texts;
     sigjmp_buf jbuf;
@@ -93,7 +94,6 @@ static void scanner(zscan_t* z, const char* buf, const size_t bufsize);
 
 F_NONNULL
 static void set_ipv4(zscan_t* z, const char* end) {
-    dmn_assert(z); dmn_assert(end);
     char txt[16];
     unsigned len = end - z->tstart;
     memcpy(txt, z->tstart, len);
@@ -109,8 +109,6 @@ static void set_ipv4(zscan_t* z, const char* end) {
 
 F_NONNULL
 static void set_ipv6(zscan_t* z, const char* end) {
-    dmn_assert(z);
-    dmn_assert(end);
     char txt[INET6_ADDRSTRLEN + 1];
     unsigned len = end - z->tstart;
     memcpy(txt, z->tstart, len);
@@ -135,21 +133,20 @@ static void set_uval(zscan_t* z) {
 
 F_NONNULL
 static void validate_origin_in_zone(zscan_t* z, const uint8_t* origin) {
-    dmn_assert(z); dmn_assert(z->zone->dname); dmn_assert(origin);
+    dmn_assert(z->zone->dname);
     if(!dname_isinzone(z->zone->dname, origin))
         parse_error("Origin '%s' is not within this zonefile's zone (%s)", logf_dname(origin), logf_dname(z->zone->dname));
 }
 
 F_NONNULL
 static void validate_lhs_not_ooz(zscan_t* z) {
-    dmn_assert(z);
     if(z->lhs_is_ooz)
         parse_error("Domainname '%s' is not within this zonefile's zone (%s)", logf_dname(z->lhs_dname), logf_dname(z->zone->dname));
 }
 
 F_NONNULL
 static void dname_set(zscan_t* z, uint8_t* dname, unsigned len, bool lhs) {
-    dmn_assert(z); dmn_assert(dname); dmn_assert(z->zone->dname);
+    dmn_assert(z->zone->dname);
     dname_status_t catstat;
     dname_status_t status;
 
@@ -196,14 +193,12 @@ static void dname_set(zscan_t* z, uint8_t* dname, unsigned len, bool lhs) {
 
 F_NONNULL
 static void text_start(zscan_t* z) {
-    dmn_assert(z);
     z->num_texts = 0;
     z->texts = NULL;
 }
 
 F_NONNULL
 static void text_add_tok(zscan_t* z, const unsigned len, const bool big_ok) {
-    dmn_assert(z);
 
     char text_temp[len + 1];
     text_temp[0] = 0;
@@ -249,7 +244,6 @@ static void text_add_tok(zscan_t* z, const unsigned len, const bool big_ok) {
 // Input must have two bytes of text constrained to [0-9A-Fa-f]
 F_NONNULL
 static unsigned hexbyte(const char* intxt) {
-    dmn_assert(intxt);
     dmn_assert(
         (intxt[0] >= '0' && intxt[0] <= '9')
         || (intxt[0] >= 'A' && intxt[0] <= 'F')
@@ -279,7 +273,6 @@ static unsigned hexbyte(const char* intxt) {
 
 F_NONNULL
 static void mult_uval(zscan_t* z, int fc) {
-    dmn_assert(z);
     fc |= 0x20;
     switch(fc) {
         case 'm': z->uval *= 60; break;
@@ -292,7 +285,6 @@ static void mult_uval(zscan_t* z, int fc) {
 
 F_NONNULL
 static void set_dyna(zscan_t* z, const char* fpc) {
-    dmn_assert(z);
     unsigned dlen = fpc - z->tstart;
     if(dlen > 255)
         parse_error_noargs("DYNA/DYNC plugin!resource string cannot exceed 255 chars");
@@ -302,8 +294,17 @@ static void set_dyna(zscan_t* z, const char* fpc) {
 }
 
 F_NONNULL
+static void set_caa_prop(zscan_t* z, const char* fpc) {
+    unsigned dlen = fpc - z->tstart;
+    if(dlen > 255)
+        parse_error_noargs("CAA property string cannot exceed 255 chars");
+    memcpy(z->caa_prop, z->tstart, dlen);
+    z->caa_prop[dlen] = 0;
+    z->tstart = NULL;
+}
+
+F_NONNULL
 static void rec_soa(zscan_t* z) {
-    dmn_assert(z);
     validate_lhs_not_ooz(z);
     if(z->lhs_dname[0] != 1)
         parse_error_noargs("SOA record can only be defined for the root of the zone");
@@ -313,21 +314,18 @@ static void rec_soa(zscan_t* z) {
 
 F_NONNULL
 static void rec_a(zscan_t* z) {
-    dmn_assert(z);
     if(ltree_add_rec_a(z->zone, z->lhs_dname, z->ipv4, z->ttl, z->limit_v4, z->lhs_is_ooz))
         siglongjmp(z->jbuf, 1);
 }
 
 F_NONNULL
 static void rec_aaaa(zscan_t* z) {
-    dmn_assert(z);
     if(ltree_add_rec_aaaa(z->zone, z->lhs_dname, z->ipv6, z->ttl, z->limit_v6, z->lhs_is_ooz))
         siglongjmp(z->jbuf, 1);
 }
 
 F_NONNULL
 static void rec_ns(zscan_t* z) {
-    dmn_assert(z);
     validate_lhs_not_ooz(z);
     if(ltree_add_rec_ns(z->zone, z->lhs_dname, z->rhs_dname, z->ttl))
         siglongjmp(z->jbuf, 1);
@@ -335,7 +333,6 @@ static void rec_ns(zscan_t* z) {
 
 F_NONNULL
 static void rec_cname(zscan_t* z) {
-    dmn_assert(z);
     validate_lhs_not_ooz(z);
     if(ltree_add_rec_cname(z->zone, z->lhs_dname, z->rhs_dname, z->ttl))
         siglongjmp(z->jbuf, 1);
@@ -343,7 +340,6 @@ static void rec_cname(zscan_t* z) {
 
 F_NONNULL
 static void rec_ptr(zscan_t* z) {
-    dmn_assert(z);
     validate_lhs_not_ooz(z);
     if(ltree_add_rec_ptr(z->zone, z->lhs_dname, z->rhs_dname, z->ttl))
         siglongjmp(z->jbuf, 1);
@@ -351,7 +347,6 @@ static void rec_ptr(zscan_t* z) {
 
 F_NONNULL
 static void rec_mx(zscan_t* z) {
-    dmn_assert(z);
     validate_lhs_not_ooz(z);
     if(ltree_add_rec_mx(z->zone, z->lhs_dname, z->rhs_dname, z->ttl, z->uv_1))
         siglongjmp(z->jbuf, 1);
@@ -359,7 +354,6 @@ static void rec_mx(zscan_t* z) {
 
 F_NONNULL
 static void rec_srv(zscan_t* z) {
-    dmn_assert(z);
     validate_lhs_not_ooz(z);
     if(ltree_add_rec_srv(z->zone, z->lhs_dname, z->rhs_dname, z->ttl, z->uv_1, z->uv_2, z->uv_3))
         siglongjmp(z->jbuf, 1);
@@ -367,7 +361,6 @@ static void rec_srv(zscan_t* z) {
 
 F_NONNULL
 static void texts_cleanup(zscan_t* z) {
-    dmn_assert(z);
     free(z->texts);
     z->texts = NULL;
     z->num_texts = 0;
@@ -375,7 +368,6 @@ static void texts_cleanup(zscan_t* z) {
 
 F_NONNULL
 static void rec_naptr(zscan_t* z) {
-    dmn_assert(z);
     validate_lhs_not_ooz(z);
     if(ltree_add_rec_naptr(z->zone, z->lhs_dname, z->rhs_dname, z->ttl, z->uv_1, z->uv_2, z->num_texts, z->texts))
         siglongjmp(z->jbuf, 1);
@@ -384,7 +376,6 @@ static void rec_naptr(zscan_t* z) {
 
 F_NONNULL
 static void rec_txt(zscan_t* z) {
-    dmn_assert(z);
     validate_lhs_not_ooz(z);
     if(ltree_add_rec_txt(z->zone, z->lhs_dname, z->num_texts, z->texts, z->ttl))
         siglongjmp(z->jbuf, 1);
@@ -393,14 +384,12 @@ static void rec_txt(zscan_t* z) {
 
 F_NONNULL
 static void rec_dyna(zscan_t* z) {
-    dmn_assert(z);
     if(ltree_add_rec_dynaddr(z->zone, z->lhs_dname, z->rhs_dyn, z->ttl, z->ttl_min, z->limit_v4, z->limit_v6, z->lhs_is_ooz))
         siglongjmp(z->jbuf, 1);
 }
 
 F_NONNULL
 static void rec_dync(zscan_t* z) {
-    dmn_assert(z);
     validate_lhs_not_ooz(z);
     if(ltree_add_rec_dync(z->zone, z->lhs_dname, z->rhs_dyn, z->origin, z->ttl, z->ttl_min, z->limit_v4, z->limit_v6))
         siglongjmp(z->jbuf, 1);
@@ -408,7 +397,6 @@ static void rec_dync(zscan_t* z) {
 
 F_NONNULL
 static void rec_rfc3597(zscan_t* z) {
-    dmn_assert(z);
     if(z->rfc3597_data_written < z->rfc3597_data_len)
         parse_error("RFC3597 generic RR claimed rdata length of %u, but only %u bytes of data present", z->rfc3597_data_len, z->rfc3597_data_written);
     validate_lhs_not_ooz(z);
@@ -418,8 +406,34 @@ static void rec_rfc3597(zscan_t* z) {
 }
 
 F_NONNULL
+static void rec_caa(zscan_t* z) {
+    dmn_assert(z->num_texts == 1); // parser-enforced
+    if(z->uv_1 > 255)
+        parse_error("CAA flags byte value %u is >255", z->uv_1);
+
+    validate_lhs_not_ooz(z);
+
+    const unsigned prop_len = strlen(z->caa_prop);
+    dmn_assert(prop_len < 256); // parser-enforced
+    const unsigned value_len = (uint8_t)z->texts[0][0];
+    const unsigned total_len = 2 + prop_len + value_len;
+
+    uint8_t* caa_rdata = xmalloc(total_len);
+    uint8_t* caa_write = caa_rdata;
+    *caa_write++ = z->uv_1;
+    *caa_write++ = prop_len;
+    memcpy(caa_write, z->caa_prop, prop_len);
+    caa_write += prop_len;
+    memcpy(caa_write, &z->texts[0][1], value_len);
+    free(z->texts[0]);
+
+    if(ltree_add_rec_rfc3597(z->zone, z->lhs_dname, 257, z->ttl, total_len, caa_rdata))
+        siglongjmp(z->jbuf, 1);
+    texts_cleanup(z);
+}
+
+F_NONNULL
 static void rfc3597_data_setup(zscan_t* z) {
-    dmn_assert(z);
     z->rfc3597_data_len = z->uval;
     z->rfc3597_data_written = 0;
     z->rfc3597_data = xmalloc(z->uval);
@@ -427,7 +441,6 @@ static void rfc3597_data_setup(zscan_t* z) {
 
 F_NONNULL
 static void rfc3597_octet(zscan_t* z) {
-    dmn_assert(z);
     if(z->rfc3597_data_written == z->rfc3597_data_len)
        parse_error_noargs("RFC3597 generic RR: more rdata is present than the indicated length");
     z->rfc3597_data[z->rfc3597_data_written++] = hexbyte(z->tstart);
@@ -435,7 +448,6 @@ static void rfc3597_octet(zscan_t* z) {
 
 F_NONNULL
 static void set_limit_v4(zscan_t* z) {
-    dmn_assert(z);
     if(z->uval > 65535)
         parse_error("$ADDR_LIMIT_V4 value %u out of range (0-65535)", z->uval);
     z->limit_v4 = z->uval;
@@ -443,7 +455,6 @@ static void set_limit_v4(zscan_t* z) {
 
 F_NONNULL
 static void set_limit_v6(zscan_t* z) {
-    dmn_assert(z);
     if(z->uval > 65535)
         parse_error("$ADDR_LIMIT_V6 value %u out of range (0-65535)", z->uval);
     z->limit_v6 = z->uval;
@@ -451,7 +462,6 @@ static void set_limit_v6(zscan_t* z) {
 
 F_NONNULL
 static void open_paren(zscan_t* z) {
-    dmn_assert(z);
     if(z->in_paren)
         parse_error_noargs("Parenthetical error: double-open");
     z->in_paren = true;
@@ -459,7 +469,6 @@ static void open_paren(zscan_t* z) {
 
 F_NONNULL
 static void close_paren(zscan_t* z) {
-    dmn_assert(z);
     if(!z->in_paren)
         parse_error_noargs("Parenthetical error: unnecessary close");
     z->in_paren = false;
@@ -511,6 +520,7 @@ static void close_paren(zscan_t* z) {
     action set_limit_v6 { set_limit_v6(z); }
 
     action set_dyna { set_dyna(z, fpc); }
+    action set_caa_prop { set_caa_prop(z, fpc); }
 
     action rec_soa { rec_soa(z); }
     action rec_a { rec_a(z); }
@@ -525,6 +535,7 @@ static void close_paren(zscan_t* z) {
     action rec_dyna { rec_dyna(z); }
     action rec_dync { rec_dync(z); }
     action rec_rfc3597 { rec_rfc3597(z); }
+    action rec_caa { rec_caa(z); }
 
     action rfc3597_data_setup { rfc3597_data_setup(z); }
     action rfc3597_octet { rfc3597_octet(z); }
@@ -619,8 +630,11 @@ static void close_paren(zscan_t* z) {
     naptr_rdata = uval %set_uv_1 ws uval %set_uv_2 ws naptr_txt ws dname_rhs;
 
     rfc3597_octet = ([0-9A-Fa-f]{2}) >token_start %rfc3597_octet;
-    rfc3597_rdata = uval %set_uv_1 ws '\\' '#' ws uval %rfc3597_data_setup
-        (ws rfc3597_octet+ $1 %0)* $1 %0;
+    rfc3597_rdata = uval %set_uv_1 ws '\\' '#' ws uval %rfc3597_data_setup ws
+        (rfc3597_octet+ ws?)**;
+
+    caa_prop = [0-9A-Za-z]{1,255} >token_start %set_caa_prop;
+    caa_rdata = uval %set_uv_1 ws caa_prop ws txt_item >start_txt;
 
     # The left half of a resource record, which for our purposes here
     #  is the optional domainname and/or the optional ttl and/or the
@@ -655,6 +669,9 @@ static void close_paren(zscan_t* z) {
                     ws ttl %set_uv_2 ws ttl %set_uv_3 ws ttl %set_uv_4
                     ws ttl %set_uv_5) %rec_soa
         | ('TYPE'i  rfc3597_rdata) %rec_rfc3597
+        # From here down, these are parser-only RR-types, which look
+        # identical to RFC3597 to the rest of the core code
+        | ('CAA'i   ws caa_rdata) %rec_caa
     );
 
     # Again, separate copy for the DYN[AC] TTL stuff
@@ -682,8 +699,9 @@ static void close_paren(zscan_t* z) {
     write data;
 }%%
 
+F_NONNULL
 static void scanner(zscan_t* z, const char* buf, const size_t bufsize) {
-    dmn_assert(z); dmn_assert(buf); dmn_assert(bufsize);
+    dmn_assert(bufsize);
 
     // This avoids the unfortunately common case of files with final lines
     //   that are unterminated by bailing out early.  This also incidentally
@@ -722,8 +740,6 @@ DMN_DIAG_POP
 typedef bool (*sij_func_t)(zscan_t*,const char*,const unsigned);
 F_NONNULL F_NOINLINE
 static bool _scan_isolate_jmp(zscan_t* z, const char* buf, const unsigned bufsize) {
-    dmn_assert(z); dmn_assert(buf);
-
     if(!sigsetjmp(z->jbuf, 0)) {
         scanner(z, buf, bufsize);
         return false;
@@ -732,9 +748,7 @@ static bool _scan_isolate_jmp(zscan_t* z, const char* buf, const unsigned bufsiz
 }
 
 zscan_rfc1035_status_t zscan_rfc1035(zone_t* zone, const char* fn) {
-    dmn_assert(zone);
     dmn_assert(zone->dname);
-    dmn_assert(fn);
     log_debug("rfc1035: Scanning zone '%s'", logf_dname(zone->dname));
 
     gdnsd_fmap_t* fmap = gdnsd_fmap_new(fn, true);

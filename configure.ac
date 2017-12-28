@@ -1,5 +1,5 @@
 AC_PREREQ([2.63])
-AC_INIT([gdnsd],[2.2.4],[https://github.com/gdnsd/gdnsd/issues])
+AC_INIT([gdnsd],[2.3.0],[https://github.com/gdnsd/gdnsd/issues])
 AC_CONFIG_SRCDIR([src/main.c])
 AC_CONFIG_AUX_DIR([acaux])
 AM_INIT_AUTOMAKE([1.11.1 dist-xz no-dist-gzip foreign tar-ustar subdir-objects -Wall])
@@ -147,26 +147,35 @@ AX_APPEND_COMPILE_FLAGS([\
     -pipe \
     -Wall \
     -Wextra \
+    -Warray-bounds=2 \
     -Wbad-function-cast \
     -Wcast-align \
     -Wcast-qual \
+    -Wduplicated-cond \
     -Wendif-labels \
     -Wfloat-equal \
     -Wfloat-conversion \
     -Wformat=2 \
+    -Wformat-signedness \
     -Winit-self \
+    -Wjump-misses-init \
     -Wlogical-op \
+    -Wloop-analysis \
     -Wmissing-declarations \
     -Wmissing-include-dirs \
     -Wmissing-prototypes \
+    -Wnull-dereference \
     -Wold-style-definition \
     -Wpointer-arith \
     -Wredundant-decls \
     -Wshadow \
     -Wsign-conversion \
+    -Wshift-overflow=2 \
     -Wstrict-overflow=5 \
     -Wstrict-prototypes \
     -Wswitch-default \
+    -Wswitch-enum \
+    -Wtrampolines \
     -Wundef \
     -Wunused \
     -Wwrite-strings \
@@ -183,7 +192,7 @@ m4_include([libgdmaps/libgdmaps.m4])
 #  might not in the future, and we need it directly
 XLIBS=$LIBS
 LIBS=""
-AC_CHECK_LIB(m,ceil)
+AC_CHECK_LIB(m,atan2)
 MATH_LIB=$LIBS
 LIBS=$XLIBS
 AC_SUBST([MATH_LIB])

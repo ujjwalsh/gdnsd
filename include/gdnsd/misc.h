@@ -50,7 +50,11 @@ typedef struct _gdnsd_rstate64_t {
 
 // Get system/filesystem-specific dirent buffer size for readdir_r() safely
 //   (dirname is just for error output)
-F_NONNULL
+// readdir_r() is being deprecated in libc/POSIX in favor of assuming readdir() is
+//   thread-safe for different streams, and using your own locking for
+//   multi-thread access to the same stream.  Therefore this function is
+//   deprecated as well.
+F_NONNULL F_DEPRECATED
 size_t gdnsd_dirent_bufsize(DIR* d V_UNUSED, const char* dirname);
 
 // Register a child process that exists for the life of the daemon, so that
@@ -144,8 +148,6 @@ static void gdnsd_downcase_str(char* str) {
 // This is JLKISS64
 F_NONNULL F_UNUSED
 static uint64_t gdnsd_rand64_get(gdnsd_rstate64_t* rs) {
-    dmn_assert(rs);
-
     rs->x = 1490024343005336237ULL * rs->x + 123456789;
 
     uint64_t y = rs->y;
@@ -168,8 +170,6 @@ static uint64_t gdnsd_rand64_get(gdnsd_rstate64_t* rs) {
 // This is JKISS32
 F_NONNULL F_UNUSED
 static uint32_t gdnsd_rand32_get(gdnsd_rstate32_t* rs) {
-    dmn_assert(rs);
-
     uint32_t y = rs->y;
     y ^= y << 5;
     y ^= y >> 7;
@@ -208,7 +208,7 @@ static uint32_t gdnsd_rand32_get(gdnsd_rstate32_t* rs) {
     c -= a; c -= b; c ^= (b>>15); \
 }
 
-F_PURE F_UNUSED
+F_PURE F_UNUSED F_WUNUSED
 static uint32_t gdnsd_lookup2(const uint8_t *k, uint32_t len) {
     dmn_assert(k || !len);
 
