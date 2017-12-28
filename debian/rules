@@ -17,10 +17,7 @@ override_dh_auto_configure:
 		--disable-silent-rules \
 		$(DEBUG)
 
-override_dh_strip:
-	dh_strip -O--dbgsym-migration='gdnsd-dbg (<< 2.2.3-1~)'
-
 override_dh_installchangelogs:
 	dh_installchangelogs NEWS
 
-.PHONY: override_dh_auto_configure override_dh_strip override_dh_installchangelogs
+.PHONY: override_dh_auto_configure override_dh_installchangelogs
