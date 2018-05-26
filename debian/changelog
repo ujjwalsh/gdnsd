@@ -1,3 +1,11 @@
+gdnsd (2.4.0-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Bump Standards-Version to 4.1.4, no changes needed.
+  * Set hardening flags (hardening=+all) in DEB_BUILD_MAINT_OPTIONS.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Sat, 26 May 2018 20:21:20 +0300
+
 gdnsd (2.3.0-1) unstable; urgency=medium
 
   * New upstream release.
