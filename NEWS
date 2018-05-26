@@ -1,3 +1,25 @@
+2.4.0 - 2018-02-15
+    * plugin_multifo: added "ignore_health" parameter. If "ignore_health" is
+      true, all addresses are added to the result set regardless of health, but
+      the up_thresh and TTL effects still happen, and the final resource-level
+      state still reflects the overall state as it would without
+      "ignore_health", for meta-plugin consumption.
+
+2.3.1 - 2018-02-15
+    * GeoIP2: Detect coordinate-free post-2018 GeoLite2-City databases, and
+      refuse to use them with auto_dc_coords. cf:
+      https://blog.maxmind.com/2018/01/02/discontinuation-of-the-geolite-legacy-databases/
+    * GeoIP2: fixed the handling of automatic, coordinate-based mapping for
+      networks with no coordinates (e.g. anon-proxy, satellite).  These now
+      return the default datacenter ordering as documented, which is how GeoIP1
+      has always behaved.  The GeoIP2 code was calculating distances for these
+      networks based on literal 0,0 coordinates since the code was introduced.
+    * Removed illegal malloc function attributes (could cause optimizer bugs?
+      no known reports)
+    * Removed useless/invalid syslog.target dependency from systemd unit
+    * Fix testsuite breakage with system Net::DNS
+    * Various minor code-quality / docs / logs / errmsg / spelling fixups
+
 2.3.0 - 2017-11-20
   *** Bugfixes:
     * Comments at the end of RRs using RFC 3597 syntax now work properly with

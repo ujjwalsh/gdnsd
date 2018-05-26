@@ -529,10 +529,11 @@ static bool zscan_foreach_record(zscan_t *z, djb_recordcb_t cb) {
 
     while(1) {
         errno = 0;
+        // cppcheck-suppress readdirCalled
         struct dirent* e = readdir(dir);
         if(!e) {
             if(errno)
-                log_fatal("djb: readdir_r(%s) failed: %s", z->path, dmn_logf_errno());
+                log_fatal("djb: readdir(%s) failed: %s", z->path, dmn_logf_errno());
             else
                 break;
         }

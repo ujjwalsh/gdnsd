@@ -481,13 +481,14 @@ static void scan_dir(struct ev_loop* loop, double initial_quiesce_time) {
         struct dirent* result = NULL;
         do {
             errno = 0;
+            // cppcheck-suppress readdirCalled
             result = readdir(zdhandle);
             if(likely(result)) {
                 if(result->d_name[0] != '.')
                     process_zonefile(result->d_name, loop, initial_quiesce_time, true);
             }
             else if(errno) {
-                log_fatal("rfc1035: readdir_r(%s) failed: %s", rfc1035_dir, dmn_logf_errno());
+                log_fatal("rfc1035: readdir(%s) failed: %s", rfc1035_dir, dmn_logf_errno());
             }
         } while(result);
         if(closedir(zdhandle))
