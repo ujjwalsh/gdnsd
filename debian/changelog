@@ -1,3 +1,18 @@
+gdnsd (2.4.2-1) unstable; urgency=medium
+
+  * New upstream point release.
+  * Bump Standards-Version to 4.3.0, no changes needed.
+  * Build-Depend on debhelper 11~ to ease backports.
+  * Drop [linux-any] from liburcu-dev Build-Depends, as it's now available on
+    kFreeBSD.
+  * Add 2019 to debian/copyright years.
+  * Misc source package changes:
+    - Drop overlay/tarballs/build-area from gbp.conf.
+    - Remove custom compression setting from source/options.
+    - Sort Build-Depends.
+
+ -- Faidon Liambotis <paravoid@debian.org>  Tue, 05 Mar 2019 16:37:21 +0200
+
 gdnsd (2.4.0-1) unstable; urgency=medium
 
   * New upstream release.
