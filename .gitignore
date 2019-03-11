@@ -14,28 +14,28 @@
 
 # Built, installed binaries
 /src/gdnsd
+/src/gdnsdctl
+/src/plugins/gdnsd_extmon_helper
+/src/plugins/gdnsd_geoip_test
+# old pathnames for above two:
 /plugins/gdnsd_extmon_helper
 /plugins/gdnsd_geoip_test
 
-# Built and not distributed or installed
+# Built and distributed in tarballs, but not kept in git
 /src/zscan_rfc1035.c
 /libgdnsd/vscf.c
 
-# Built and installed, but not distributed
-/libgdnsd/bopts.h
-
-# Testsuite input/output directories
+# Testsuite stuff
 /t/testout/
-
-# lcov html output from qa/coverage.sh
-/lcovout/
-
-# libgdmaps unit test junk
 /t/libgdmaps/*.t
 /t/libgdmaps/etc/
-
-# saved state for "prove"
 .prove
+
+# Various QA tool outputs
+/_vginst
+/lcovout/
+/bw-output/
+/.scannerwork/
 
 # Various tool outputs in all dirs
 Makefile
@@ -47,6 +47,7 @@ Makefile.in
 *.so
 *.lo
 *.la
+*.a
 *.gcov
 *.trucov
 *.info
@@ -63,5 +64,6 @@ clang_output_*
 *.pod
 /wikidocs/
 
-# generated systemd unit file
-sysd/gdnsd.service
+# generated systemd unit file + initscript
+init/gdnsd.service
+init/gdnsd.init

@@ -20,7 +20,7 @@ plugins => {
   undefined_datacenters_ok => true
   maps => {
    map1 => {
-    geoip_db => "FakeGeoIP.dat"
+    geoip2_db => "FakeCountry.mmdb"
     datacenters => [ na, eu, ap, sa ]
     map => {
      AS => [ ap, eu ]
@@ -33,19 +33,19 @@ plugins => {
     }
    }
    map2 => {
-    geoip_db => "FakeGeoIP.dat"
+    geoip2_db => "FakeCountry.mmdb"
     datacenters => [ dc1, dc2, dc3 ]
     map => {
      NA => { US => [ dc2 ] }
     }
    }
    map-empty => {
-    geoip_db => "FakeGeoIP.dat"
+    geoip2_db => "FakeCountry.mmdb"
     datacenters => [ dc1, dc2 ]
     map => { NA => { US => [] } }
    }
    map-undef => {
-    geoip_db => "FakeGeoIP.dat"
+    geoip2_db => "FakeCountry.mmdb"
     datacenters => [ DC-A, DC-B, DC-C ]
     map => { NA => { US => [ DC-A ] } }
    }
@@ -77,9 +77,9 @@ plugins => {
     service_types => up
     map => map2,
     dcmap => {
-     dc1 => dc1cn
-     dc2 => dc2cn-loop
-     dc3 => dc3cn
+     dc1 => dc1cn.example.net.
+     dc2 => dc2cn-loop.example.net.
+     dc3 => dc3cn.example.net.
     }
    }
    res44 => {
@@ -134,9 +134,9 @@ plugins => {
     service_types => up
     map => map2,
     dcmap = {
-     dc3 => dc3cn
-     dc2 => dc2cn
-     dc1 => dc1cn
+     dc3 => dc3cn.example.net.
+     dc2 => dc2cn.example.net.
+     dc1 => dc1cn.example.net.
     }
    }
    res8 => {

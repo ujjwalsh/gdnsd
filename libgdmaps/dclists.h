@@ -28,12 +28,12 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
-typedef struct _dclists dclists_t;
+typedef struct dclists dclists_t;
 
 typedef enum {
-   KILL_NO_LISTS,
-   KILL_ALL_LISTS,
-   KILL_NEW_LISTS
+    KILL_NO_LISTS,
+    KILL_ALL_LISTS,
+    KILL_NEW_LISTS
 } dclists_destroy_depth_t;
 
 // At the nlist/ntree layer, a uint32_t node reference has the high bit set
@@ -54,13 +54,13 @@ typedef enum {
 #define DCLIST_AUTO 0x7FFFFFFF
 #define DCLIST_MAX  0x7FFFFFFE
 
-F_NONNULL F_WUNUSED
+F_NONNULL F_WUNUSED F_RETNN
 dclists_t* dclists_new(const dcinfo_t* info);
-F_NONNULL F_WUNUSED
+F_NONNULL F_WUNUSED F_RETNN
 dclists_t* dclists_clone(const dclists_t* old);
 F_NONNULL F_PURE
 unsigned dclists_get_count(const dclists_t* lists);
-F_NONNULL F_PURE
+F_NONNULL F_PURE F_RETNN
 const uint8_t* dclists_get_list(const dclists_t* lists, const uint32_t idx);
 F_NONNULL
 void dclists_replace_list0(dclists_t* lists, uint8_t* newlist);
